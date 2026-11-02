@@ -1,0 +1,14 @@
+Security Review Notes
+
+Key derivation uses argon2id with a per-vault random salt. The salt is not secret
+and is stored on the server; the password never leaves the client. Argon2id was
+chosen over pbkdf2 because it is memory-hard, which makes large-scale offline
+guessing expensive in RAM as well as in CPU time.
+
+File contents and filenames are protected with aes-256-gcm. Every encryption uses
+a fresh random nonce, because reusing a nonce under the same key in gcm mode is
+catastrophic: it can reveal plaintext and allow tag forgery.
+
+Open items from the audit: the argon2id cost parameters are not persisted next to
+the salt, and no associated data binds a ciphertext to the record it is stored in.
+Both are documented rather than hidden.

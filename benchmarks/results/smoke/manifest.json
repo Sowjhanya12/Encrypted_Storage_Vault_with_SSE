@@ -1,0 +1,448 @@
+{
+  "command": "/sessions/rcw-013ydqgzkur5jbctwsxgc1hi/mnt/cyber_pr/benchmarks/run_all.py --profile smoke --suites b4_upload_rebuild,b5_search,b6_storage --dataset-role development --label SMOKE-TEST DATA, NOT AUTHORITATIVE: 50-document B4 cap on the Cowork Linux sandbox (2 logical cores, 3.8 GiB, Flask dev server on loopback). The authoritative 200-document run is to be executed on the project owner's Windows machine with --profile full --dataset-role authoritative.",
+  "dataset_role": "development",
+  "environment": {
+    "argon2_production_parameters": {
+      "available": true,
+      "memory_cost_kib": 65536,
+      "parallelism": 4,
+      "persisted_in_vault_meta": false,
+      "salt_size_bytes": 16,
+      "time_cost": 3
+    },
+    "captured_at_utc": "2026-08-27T19:38:56+00:00",
+    "hardware": {
+      "available_ram_bytes": 3692482560,
+      "logical_cores": 2,
+      "physical_cores": 1,
+      "psutil_available": true,
+      "total_ram_bytes": 4105633792
+    },
+    "libraries": {
+      "argon2": "25.1.0",
+      "cryptography": "50.0.0",
+      "flask": "3.1.3",
+      "matplotlib": "3.10.9",
+      "numpy": "2.2.6",
+      "requests": "2.34.2"
+    },
+    "machine": "x86_64",
+    "openssl_version": "OpenSSL 4.0.1 9 Jun 2026",
+    "platform": "Linux-6.8.0-136-generic-x86_64-with-glibc2.35",
+    "privacy_note": "No hostname, username, or absolute filesystem path outside the project is recorded -- this snapshot describes the machine's shape, not its owner.",
+    "processor": "x86_64",
+    "python_64bit": true,
+    "python_compiler": "GCC 11.4.0",
+    "python_implementation": "CPython",
+    "python_version": "3.10.12",
+    "release": "6.8.0-136-generic",
+    "sqlite_version": "3.37.2",
+    "system": "Linux",
+    "timer": {
+      "clock": "time.perf_counter_ns",
+      "resolution_seconds": 6.3e-08
+    },
+    "timezone_offset_seconds": 0
+  },
+  "finished_at": "2026-08-27T19:39:21+00:00",
+  "integrity_note": "Each suite entry carries the SHA-256 and line count of the raw sample file as written by this run. benchmarks/harness/recorder.py's verify() re-checks them; the report generator refuses to render a suite whose raw file does not match, or that this run did not execute.",
+  "interrupted": false,
+  "label": "SMOKE-TEST DATA, NOT AUTHORITATIVE: 50-document B4 cap on the Cowork Linux sandbox (2 logical cores, 3.8 GiB, Flask dev server on loopback). The authoritative 200-document run is to be executed on the project owner's Windows machine with --profile full --dataset-role authoritative.",
+  "profile": "smoke",
+  "profile_sizing": {
+    "b1_primitives": {
+      "repeats": 5,
+      "sweep_memory_kib": [
+        16384,
+        65536
+      ],
+      "sweep_repeats": 2,
+      "sweep_time_cost": [
+        1,
+        3
+      ],
+      "warmup": 1
+    },
+    "b2_token_generation": {
+      "micro_batch": 1000,
+      "micro_repeats": 10,
+      "repeats": 5,
+      "sizes_bytes": [
+        1024,
+        65536,
+        1048576
+      ]
+    },
+    "b3_indexing": {
+      "corpus_sizes": [
+        10,
+        25,
+        50
+      ],
+      "repeats": 3
+    },
+    "b4_upload_rebuild": {
+      "max_documents": 50,
+      "rebuild_checkpoints": [
+        10,
+        25,
+        50
+      ],
+      "rebuild_repeats": 3
+    },
+    "b5_search": {
+      "match_counts": [
+        1,
+        2,
+        5,
+        10,
+        25
+      ],
+      "repeats": 10,
+      "scaling_corpus_sizes": [
+        10,
+        25
+      ],
+      "scaling_fixed_k": 5
+    },
+    "b6_storage": {
+      "corpus_size": 50
+    },
+    "corpus": {
+      "seed": 20260827,
+      "vocabulary_size": 4000,
+      "words_per_document": [
+        400,
+        900
+      ],
+      "zipf_exponent": 1.1
+    },
+    "description": "System-layer smoke sizing: the largest end-to-end workload that fits inside the development sandbox's per-command time limit. Real measurements of the real two-process system, but capped at 50 documents rather than the full profile's 200 -- reportable as a scaling smoke test only, never as the authoritative dataset.",
+    "name": "smoke"
+  },
+  "run_id": "20260827T193856Z",
+  "started_at": "2026-08-27T19:38:56+00:00",
+  "suite_metadata": {
+    "b4_upload_rebuild": {
+      "checkpoints": [
+        {
+          "decomposition_ratio": 0.9867759177015879,
+          "rebuild_median_seconds": 0.068679624,
+          "total_postings": 1915,
+          "vault_documents": 10
+        },
+        {
+          "decomposition_ratio": 1.0833228683150424,
+          "rebuild_median_seconds": 0.141335953,
+          "total_postings": 4847,
+          "vault_documents": 25
+        },
+        {
+          "decomposition_ratio": 0.9019126408211762,
+          "rebuild_median_seconds": 0.493380874,
+          "total_postings": 9921,
+          "vault_documents": 50
+        }
+      ],
+      "clock_resolution_seconds": 1.15e-07,
+      "corpus": {
+        "documents": 50,
+        "fingerprint_sha256": "81d10c80075954afe808a9e1151d7ae29d06569d6ad8720e2e3573b66e6a3cfc"
+      },
+      "correctness_gates": [
+        "vault unlocked through the real POST /api/unlock bootstrap path",
+        "all 50 uploads returned 201 and every filename decrypted back to the name it was uploaded under"
+      ],
+      "implementations_under_test": [
+        "client.client_app (POST /api/documents, POST /api/unlock)",
+        "client.client_app._rebuild_and_push_index",
+        "client.cloud_client.push_document",
+        "client.cloud_client.fetch_document",
+        "client.cloud_client.replace_index",
+        "client.indexer.build_index",
+        "client.crypto.aes_gcm_decrypt",
+        "client.tokenizer.tokenize"
+      ],
+      "measures": [
+        "upload_document_end_to_end",
+        "rebuild_index_total",
+        "rebuild_step_fetch_all_documents",
+        "rebuild_step_decrypt_and_tokenize",
+        "rebuild_step_build_index",
+        "rebuild_step_replace_index",
+        "http_requests_per_upload",
+        "http_document_fetches_per_upload"
+      ],
+      "per_upload_sample_size": 1,
+      "topology": "trusted client in-process (Flask test client) -> real HTTP -> cloud_app.py subprocess"
+    },
+    "b5_search": {
+      "clock_resolution_seconds": 1.06e-07,
+      "correctness_gates": [
+        "every probe keyword returned exactly its planted document set from the live system (1, 2, 5, 10, 25 matches), and the observed GET /documents count equalled the result count each time",
+        "index-size experiment held the result count fixed at 5 across 2 vault sizes"
+      ],
+      "experiment_index_size_scaling": {
+        "fixed_result_count": 5,
+        "results": [
+          {
+            "access_pattern": [
+              "POST /search",
+              "GET /documents/8323295b6fdc563d56a4873b88748476",
+              "GET /documents/850504f9d3b86488a24420b0ea9b2a4d",
+              "GET /documents/9ac348fde17b457797fd88fe7bf2be6f",
+              "GET /documents/d65847550866d64e32f6401213aa5953",
+              "GET /documents/df0ecbc5a910819cbab735f28c9e7ffa"
+            ],
+            "access_pattern_shape": {
+              "GET /documents/<doc_id>": 5,
+              "POST /search": 1
+            },
+            "client_median_seconds": 0.0118100745,
+            "cloud_median_seconds": 0.001996136,
+            "corpus_fingerprint_sha256": "7f51876597c8e0e3fd271f5c085b5b2af2f774591450ebe47ec01eed2497c6e5",
+            "document_fetches": 5,
+            "matching_documents": 5,
+            "total_postings": 1930,
+            "vault_documents": 10
+          },
+          {
+            "access_pattern": [
+              "POST /search",
+              "GET /documents/8323295b6fdc563d56a4873b88748476",
+              "GET /documents/850504f9d3b86488a24420b0ea9b2a4d",
+              "GET /documents/9ac348fde17b457797fd88fe7bf2be6f",
+              "GET /documents/d65847550866d64e32f6401213aa5953",
+              "GET /documents/df0ecbc5a910819cbab735f28c9e7ffa"
+            ],
+            "access_pattern_shape": {
+              "GET /documents/<doc_id>": 5,
+              "POST /search": 1
+            },
+            "client_median_seconds": 0.0113744625,
+            "cloud_median_seconds": 0.0019400049999999999,
+            "corpus_fingerprint_sha256": "30a9de72d6ca6e2817e16123099ac279f7c25d0a047fc1f52768fe5f30354d6b",
+            "document_fetches": 5,
+            "matching_documents": 5,
+            "total_postings": 4862,
+            "vault_documents": 25
+          }
+        ],
+        "vault_sizes": [
+          10,
+          25
+        ]
+      },
+      "experiment_match_count_scaling": {
+        "corpus_fingerprint_sha256": "21d3b0a4db68497370ee3bd42bf2ef1573bd5729419a36cc9c82fbf6cef4ab38",
+        "match_counts": [
+          1,
+          2,
+          5,
+          10,
+          25
+        ],
+        "results": [
+          {
+            "access_pattern": [
+              "POST /search",
+              "GET /documents/d65847550866d64e32f6401213aa5953"
+            ],
+            "access_pattern_shape": {
+              "GET /documents/<doc_id>": 1,
+              "POST /search": 1
+            },
+            "client_median_seconds": 0.0072561069999999995,
+            "cloud_median_seconds": 0.003586021,
+            "document_fetches": 1,
+            "matching_documents": 1,
+            "vault_documents": 25
+          },
+          {
+            "access_pattern": [
+              "POST /search",
+              "GET /documents/8323295b6fdc563d56a4873b88748476",
+              "GET /documents/d65847550866d64e32f6401213aa5953"
+            ],
+            "access_pattern_shape": {
+              "GET /documents/<doc_id>": 2,
+              "POST /search": 1
+            },
+            "client_median_seconds": 0.0127643115,
+            "cloud_median_seconds": 0.0032603865,
+            "document_fetches": 2,
+            "matching_documents": 2,
+            "vault_documents": 25
+          },
+          {
+            "access_pattern": [
+              "POST /search",
+              "GET /documents/8323295b6fdc563d56a4873b88748476",
+              "GET /documents/850504f9d3b86488a24420b0ea9b2a4d",
+              "GET /documents/9ac348fde17b457797fd88fe7bf2be6f",
+              "GET /documents/d65847550866d64e32f6401213aa5953",
+              "GET /documents/df0ecbc5a910819cbab735f28c9e7ffa"
+            ],
+            "access_pattern_shape": {
+              "GET /documents/<doc_id>": 5,
+              "POST /search": 1
+            },
+            "client_median_seconds": 0.014625547,
+            "cloud_median_seconds": 0.0031732130000000002,
+            "document_fetches": 5,
+            "matching_documents": 5,
+            "vault_documents": 25
+          },
+          {
+            "access_pattern": [
+              "POST /search",
+              "GET /documents/3b30f6b249f827b8af35f71afba56732",
+              "GET /documents/4153e62a01d8aff48998ca0d4ed83986",
+              "GET /documents/71a21b0f0ab65a72a963d3d0ff845b09",
+              "GET /documents/8323295b6fdc563d56a4873b88748476",
+              "GET /documents/835918cf9c9846a3a3644b052a6156e4",
+              "GET /documents/850504f9d3b86488a24420b0ea9b2a4d",
+              "GET /documents/9ac348fde17b457797fd88fe7bf2be6f",
+              "GET /documents/a500f6fe188a2ff58a2d665b28a631bd",
+              "GET /documents/d65847550866d64e32f6401213aa5953",
+              "GET /documents/df0ecbc5a910819cbab735f28c9e7ffa"
+            ],
+            "access_pattern_shape": {
+              "GET /documents/<doc_id>": 10,
+              "POST /search": 1
+            },
+            "client_median_seconds": 0.0228232285,
+            "cloud_median_seconds": 0.0024677559999999998,
+            "document_fetches": 10,
+            "matching_documents": 10,
+            "vault_documents": 25
+          },
+          {
+            "access_pattern": [
+              "POST /search",
+              "GET /documents/128e66c983cd759de1d084e926338f11",
+              "GET /documents/1c9f097f73e865a2ac3c57cac208280d",
+              "GET /documents/214292aa264b7d5177dc9696354a5d01",
+              "GET /documents/2d1669f5cc60f3ab4b4accb7530205e2",
+              "... 21 further calls omitted"
+            ],
+            "access_pattern_shape": {
+              "GET /documents/<doc_id>": 25,
+              "POST /search": 1
+            },
+            "client_median_seconds": 0.048374833,
+            "cloud_median_seconds": 0.002441569,
+            "document_fetches": 25,
+            "matching_documents": 25,
+            "vault_documents": 25
+          }
+        ],
+        "total_postings": 4940,
+        "vault_documents": 25
+      },
+      "implementations_under_test": [
+        "client.client_app (POST /api/search)",
+        "client.search.build_search_token",
+        "client.search.decrypt_search_results",
+        "client.cloud_client.run_remote_search",
+        "client.tokenizer.tokenize"
+      ],
+      "measures": [
+        "cloud_search_loop",
+        "client_search_end_to_end",
+        "search_result_count",
+        "search_document_fetches",
+        "eager_fetch_cost_seconds",
+        "cloud_search_loop_fixed_k",
+        "client_search_end_to_end_fixed_k"
+      ],
+      "topology": "trusted client in-process (Flask test client) -> real HTTP -> cloud_app.py subprocess"
+    },
+    "b6_storage": {
+      "clock_resolution_seconds": 1.39e-07,
+      "corpus": {
+        "documents": 50,
+        "fingerprint_sha256": "81d10c80075954afe808a9e1151d7ae29d06569d6ad8720e2e3573b66e6a3cfc",
+        "total_postings": 9921
+      },
+      "correctness_gates": [
+        "vault verified to hold all 50 documents before measuring",
+        "row counts in the cloud's own tables match the corpus: one document row per file and one index row per (keyword, document) posting"
+      ],
+      "implementations_under_test": [
+        "client.client_app (POST /api/unlock, GET /api/documents)",
+        "client.crypto.aes_gcm_encrypt",
+        "client.indexer.build_index",
+        "client.cloud_client.push_document",
+        "client.cloud_client.replace_index"
+      ],
+      "measurement_method": {
+        "estimates_used": false,
+        "file_bytes": "os.path.getsize on the live cloud's SQLite file",
+        "logical_bytes": "SUM(LENGTH(column)) per column group, read-only connection",
+        "per_table_bytes": "SQLite dbstat virtual table"
+      },
+      "measures": [
+        "plaintext_corpus_bytes",
+        "database_file_bytes",
+        "database_pages_bytes",
+        "table_page_bytes",
+        "documents_ciphertext_bytes",
+        "index_label_bytes",
+        "index_value_bytes",
+        "meta_bytes"
+      ]
+    }
+  },
+  "suites": {
+    "b1_primitives": {
+      "ran_in_this_run": false,
+      "status": "not_run"
+    },
+    "b2_token_generation": {
+      "ran_in_this_run": false,
+      "status": "not_run"
+    },
+    "b3_indexing": {
+      "ran_in_this_run": false,
+      "status": "not_run"
+    },
+    "b4_upload_rebuild": {
+      "duration_seconds": 16.979,
+      "error": null,
+      "finished_at": "2026-08-27T19:39:13+00:00",
+      "ran_in_this_run": true,
+      "raw_file": "raw/b4_upload_rebuild.jsonl",
+      "raw_line_count": 225,
+      "raw_sha256": "a52300d2e4824e318432a0954c3bfa8a92cc32debf94c6022ad3945a983cb185",
+      "sample_lines": 225,
+      "started_at": "2026-08-27T19:38:56+00:00",
+      "status": "ok"
+    },
+    "b5_search": {
+      "duration_seconds": 5.893,
+      "error": null,
+      "finished_at": "2026-08-27T19:39:19+00:00",
+      "ran_in_this_run": true,
+      "raw_file": "raw/b5_search.jsonl",
+      "raw_line_count": 189,
+      "raw_sha256": "903d908370fe5b4337a4699477a03bb226759ce0236563b99cee7fafe2a1005e",
+      "sample_lines": 189,
+      "started_at": "2026-08-27T19:39:13+00:00",
+      "status": "ok"
+    },
+    "b6_storage": {
+      "duration_seconds": 1.85,
+      "error": null,
+      "finished_at": "2026-08-27T19:39:21+00:00",
+      "ran_in_this_run": true,
+      "raw_file": "raw/b6_storage.jsonl",
+      "raw_line_count": 28,
+      "raw_sha256": "0ff571957701e1f17c9f5a251e16e79508552e8d1758d2cd1ecc1facc00677a7",
+      "sample_lines": 28,
+      "started_at": "2026-08-27T19:39:19+00:00",
+      "status": "ok"
+    }
+  },
+  "wall_clock_seconds": 24.867
+}

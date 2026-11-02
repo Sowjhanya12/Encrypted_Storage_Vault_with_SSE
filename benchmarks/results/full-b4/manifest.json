@@ -1,0 +1,179 @@
+{
+  "command": "C:\\preetish\\cyber_pr\\benchmarks\\run_all.py --profile full --suites b4_upload_rebuild --dataset-role authoritative --results-dir benchmarks\\results\\full-b4 --label Windows 11 Home, Intel Core i7-1250U (10 physical / 12 logical), 15.7 GB RAM, Python 3.13.12, idle machine",
+  "dataset_role": "authoritative",
+  "environment": {
+    "argon2_production_parameters": {
+      "available": true,
+      "memory_cost_kib": 65536,
+      "parallelism": 4,
+      "persisted_in_vault_meta": false,
+      "salt_size_bytes": 16,
+      "time_cost": 3
+    },
+    "captured_at_utc": "2026-09-01T17:59:55+00:00",
+    "hardware": {
+      "available_ram_bytes": 1418002432,
+      "logical_cores": 12,
+      "physical_cores": 10,
+      "psutil_available": true,
+      "total_ram_bytes": 16858472448
+    },
+    "libraries": {
+      "argon2": "25.1.0",
+      "cryptography": "50.0.1",
+      "flask": "3.1.3",
+      "matplotlib": "3.10.6",
+      "numpy": "2.3.2",
+      "requests": "2.32.5"
+    },
+    "machine": "AMD64",
+    "openssl_version": "OpenSSL 4.0.2 25 Aug 2026",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "privacy_note": "No hostname, username, or absolute filesystem path outside the project is recorded -- this snapshot describes the machine's shape, not its owner.",
+    "processor": "Intel64 Family 6 Model 154 Stepping 4, GenuineIntel",
+    "python_64bit": true,
+    "python_compiler": "MSC v.1944 64 bit (AMD64)",
+    "python_implementation": "CPython",
+    "python_version": "3.13.12",
+    "release": "11",
+    "sqlite_version": "3.50.4",
+    "system": "Windows",
+    "timer": {
+      "clock": "time.perf_counter_ns",
+      "resolution_seconds": 1e-07
+    },
+    "timezone_offset_seconds": 19800
+  },
+  "finished_at": "2026-09-01T18:30:46+00:00",
+  "integrity_note": "Each suite entry carries the SHA-256 and line count of the raw sample file as written by this run. benchmarks/harness/recorder.py's verify() re-checks them; the report generator refuses to render a suite whose raw file does not match, or that this run did not execute.",
+  "interrupted": false,
+  "label": "Windows 11 Home, Intel Core i7-1250U (10 physical / 12 logical), 15.7 GB RAM, Python 3.13.12, idle machine",
+  "profile": "full",
+  "profile_sizing": {
+    "b1_primitives": {
+      "repeats": 30,
+      "sweep_memory_kib": [
+        16384,
+        32768,
+        65536,
+        131072,
+        262144
+      ],
+      "sweep_repeats": 5,
+      "sweep_time_cost": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "warmup": 2
+    },
+    "b2_token_generation": {
+      "micro_batch": 5000,
+      "micro_repeats": 20,
+      "repeats": 15,
+      "sizes_bytes": [
+        1024,
+        4096,
+        16384,
+        65536,
+        262144,
+        1048576,
+        4194304,
+        16777216
+      ]
+    },
+    "b3_indexing": {
+      "corpus_sizes": [
+        10,
+        25,
+        50,
+        100,
+        200
+      ],
+      "repeats": 10
+    },
+    "b4_upload_rebuild": {
+      "max_documents": 200,
+      "rebuild_checkpoints": [
+        10,
+        25,
+        50,
+        100,
+        200
+      ],
+      "rebuild_repeats": 10
+    },
+    "b5_search": {
+      "match_counts": [
+        1,
+        2,
+        5,
+        10,
+        25,
+        50,
+        100
+      ],
+      "repeats": 30,
+      "scaling_corpus_sizes": [
+        25,
+        50,
+        100,
+        200
+      ],
+      "scaling_fixed_k": 5
+    },
+    "b6_storage": {
+      "corpus_size": 200
+    },
+    "corpus": {
+      "seed": 20260827,
+      "vocabulary_size": 4000,
+      "words_per_document": [
+        400,
+        900
+      ],
+      "zipf_exponent": 1.1
+    },
+    "description": "Reportable sizing. 200-document corpus (the agreed Phase 7 maximum), AES-GCM measured from 1 KiB to 16 MiB, and repetition counts chosen so every reported figure carries a usable confidence interval.",
+    "name": "full"
+  },
+  "run_id": "20260901T175955Z",
+  "started_at": "2026-09-01T17:59:55+00:00",
+  "suite_metadata": {},
+  "suites": {
+    "b1_primitives": {
+      "ran_in_this_run": false,
+      "status": "not_run"
+    },
+    "b2_token_generation": {
+      "ran_in_this_run": false,
+      "status": "not_run"
+    },
+    "b3_indexing": {
+      "ran_in_this_run": false,
+      "status": "not_run"
+    },
+    "b4_upload_rebuild": {
+      "duration_seconds": 1850.28,
+      "error": "AssertionError: B4 correctness gate failed: upload of doc_0159_kuffo_kequtroc.txt returned 502: b'{\"error\":\"could not reach the cloud service at http://127.0.0.1:55834: HTTPConnectionPool(host=\\'127.0.0.1\\', port=55834): Read timed out. (read timeout=60)\"}\\n'\n  elapsed before failure: 1491.167 s (one attempt, no retry)\n  cloud subprocess diagnostics: {\"process_started\": true, \"process_alive\": true, \"returncode\": null, \"base_url\": \"http://127.0.0.1:55834\", \"database_path\": \"C:\\\\Users\\\\preet\\\\AppData\\\\Local\\\\Temp\\\\vault-bench-4kusdwgc\\\\vault.sqlite3\", \"database_exists\": true, \"http_timeout_in_effect_seconds\": 60, \"captured_output_tail\": \"T /documents/3e69530db75861afa70ed9c0db55feab HTTP/1.1\\\" 200 -\\n127.0.0.1 - - [01/Sep/2026 23:35:54] \\\"GET /documents/7e45f6a75ec39f03ea5cb7661acc7921 HTTP/1.1\\\" 200 -\\n127.0.0.1 - - [01/Sep/2026 23:35:54] \\\"GET /documents/6e13c4796d1a68f064c0ac52aa92761e HTTP/1.1\\\" 200 -\\n127.0.0.1 - - [01/Sep/2026 23:35:54] \\\"GET /documents/5baae061e3883e0e78b77a1f7e50f1b5 HTTP/1.1\\\" 200 -\\n127.0.0.1 - - [01/Sep/2026 23:35:54] \\\"GET /documents/79e165b15af954c87a72b03d3e9244a2 HTTP/1.1\\\" 200 -\\n127.0.0.1 - - [01/Sep/2026 23:35:54] \\\"GET /documents/fc3edc53152ea7da615aaf6caf0e0119 HTTP/1.1\\\" 200 -\\n127.0.0.1 - - [01/Sep/2026 23:35:54] \\\"GET /documents/4011939eb63226ea6305d139d8b7371e HTTP/1.1\\\" 200 -\\n127.0.0.1 - - [01/Sep/2026 23:35:54] \\\"GET /documents/cda9965a1011a43dc97f86aaac2d3cc0 HTTP/1.1\\\" 200 -\\n127.0.0.1 - - [01/Sep/2026 23:35:54] \\\"GET /documents/ea5638744a35f977d623b010280f21f8 HTTP/1.1\\\" 200 -\\n127.0.0.1 - - [01/Sep/2026 23:35:54] \\\"GET /documents/12ee3eae1fbec78e84319698014139ef HTTP/1.1\\\" 200 -\\n127.0.0.1 - - [01/Sep/2026 23:35:55] \\\"GET /documents/8bb15961b7b792529e8fbb30b3c24b8a HTTP/1.1\\\" 200 -\\n127.0.0.1 - - [01/Sep/2026 23:35:55] \\\"GET /documents/d675cce2638ecd36e30d0c005161648b HTTP/1.1\\\" 200 -\\n127.0.0.1 - - [01/Sep/2026 23:35:55] \\\"GET /documents/7cbd5508dd39cf8acd4a6be8a0823772 HTTP/1.1\\\" 200 -\\n127.0.0.1 - - [01/Sep/2026 23:35:55] \\\"GET /documents/af8b54cdf3fd78dcb657923c52b1ce64 HTTP/1.1\\\" 200 -\\n127.0.0.1 - - [01/Sep/2026 23:35:55] \\\"GET /documents/9e848fda192d2f287b184f1faf31a247 HTTP/1.1\\\" 200 -\\n127.0.0.1 - - [01/Sep/2026 23:35:55] \\\"GET /documents/35d327ee62ce2f4fceb6467bc777ab12 HTTP/1.1\\\" 200 -\\n127.0.0.1 - - [01/Sep/2026 23:35:55] \\\"GET /documents/6f974267d579ea5b9cf941122347bcb5 HTTP/1.1\\\" 200 -\\n127.0.0.1 - - [01/Sep/2026 23:35:55] \\\"GET /documents/b539804462324e5112d5a3d3f775d5c8 HTTP/1.1\\\" 200 -\\n127.0.0.1 - - [01/Sep/2026 23:35:55] \\\"GET /documents/9c763994581daf7d0a16e6d34c585032 HTTP/1.1\\\" 200 -\\n127.0.0.1 - - [01/Sep/2026 23:35:55] \\\"GET /documents/921468a4baaad16982c6267cffba6a7d HTTP/1.1\\\" 200 -\\n\"}",
+      "finished_at": "2026-09-01T18:30:46+00:00",
+      "ran_in_this_run": true,
+      "raw_file": "raw/b4_upload_rebuild.jsonl",
+      "raw_line_count": 717,
+      "raw_sha256": "20e394b612077ff8237f41f0ccf6a468ade68aa9969397ae1897b775eb8d483f",
+      "sample_lines": 717,
+      "started_at": "2026-09-01T17:59:55+00:00",
+      "status": "failed"
+    },
+    "b5_search": {
+      "ran_in_this_run": false,
+      "status": "not_run"
+    },
+    "b6_storage": {
+      "ran_in_this_run": false,
+      "status": "not_run"
+    }
+  },
+  "wall_clock_seconds": 1850.506
+}

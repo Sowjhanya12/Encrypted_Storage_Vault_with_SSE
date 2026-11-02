@@ -1,0 +1,12 @@
+Meeting Minutes - Supervisor Check-in
+
+Present: student, supervisor.
+
+Discussed progress on the index build and the search loop. The supervisor asked
+for measured numbers rather than assertions, specifically how the cost of adding a
+file grows as the vault fills up, and how search time depends on the number of
+matching documents.
+
+Action items: produce the benchmark charts before the next meeting, and prepare a
+short answer to the question of what the server learns from a repeated query. The
+deadline for both is Friday.

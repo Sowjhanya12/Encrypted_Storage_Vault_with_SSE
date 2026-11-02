@@ -1,0 +1,15 @@
+Encrypted Cloud Vault - Project Brief
+
+The goal of this project is to store personal files on a cloud service that we do
+not trust, while still being able to search them by keyword. Ordinary encryption
+protects the contents but destroys search; searchable symmetric encryption gives
+both, at the cost of a precisely stated amount of leakage.
+
+Scope for this term is a single-keyword static scheme. Multi-keyword and boolean
+queries are out of scope and are recorded as future work. The deadline for the
+implementation phase is the end of week ten, with the demonstration and the
+written report due in week twelve.
+
+Deliverables: a working two-process implementation, an honest leakage analysis,
+a reproducible benchmark suite, and a demonstration that the server holds no
+readable data at any point.

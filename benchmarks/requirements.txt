@@ -1,0 +1,12 @@
+# Phase 7 (benchmarks) -- kept OUT of the root requirements.txt so the
+# application's dependency set is unchanged by a measurement phase.
+# Install with:  python -m pip install -r benchmarks/requirements.txt
+#
+# The harness itself (timing, statistics, recording) depends on the
+# standard library ONLY -- deliberately, so raw measurement never
+# depends on a third-party version. numpy/matplotlib are needed only
+# by benchmarks/analysis/ (curve fitting and charts), and psutil only
+# to enrich the environment record (its absence is handled, not fatal).
+numpy>=1.24
+matplotlib>=3.7
+psutil>=5.9        # optional -- environment.py degrades gracefully without it

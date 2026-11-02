@@ -1,0 +1,316 @@
+{
+  "command": "/sessions/rcw-013ydqgzkur5jbctwsxgc1hi/mnt/cyber_pr/benchmarks/run_all.py --profile quick --dataset-role development --label calibration run on the Cowork Linux sandbox (2 logical cores); NOT the authoritative dataset",
+  "dataset_role": "development",
+  "environment": {
+    "argon2_production_parameters": {
+      "available": true,
+      "memory_cost_kib": 65536,
+      "parallelism": 4,
+      "persisted_in_vault_meta": false,
+      "salt_size_bytes": 16,
+      "time_cost": 3
+    },
+    "captured_at_utc": "2026-08-27T19:17:25+00:00",
+    "hardware": {
+      "available_ram_bytes": 3692130304,
+      "logical_cores": 2,
+      "physical_cores": 1,
+      "psutil_available": true,
+      "total_ram_bytes": 4105633792
+    },
+    "libraries": {
+      "argon2": "25.1.0",
+      "cryptography": "50.0.0",
+      "flask": "3.1.3",
+      "matplotlib": "3.10.9",
+      "numpy": "2.2.6",
+      "requests": "2.34.2"
+    },
+    "machine": "x86_64",
+    "openssl_version": "OpenSSL 4.0.1 9 Jun 2026",
+    "platform": "Linux-6.8.0-136-generic-x86_64-with-glibc2.35",
+    "privacy_note": "No hostname, username, or absolute filesystem path outside the project is recorded -- this snapshot describes the machine's shape, not its owner.",
+    "processor": "x86_64",
+    "python_64bit": true,
+    "python_compiler": "GCC 11.4.0",
+    "python_implementation": "CPython",
+    "python_version": "3.10.12",
+    "release": "6.8.0-136-generic",
+    "sqlite_version": "3.37.2",
+    "system": "Linux",
+    "timer": {
+      "clock": "time.perf_counter_ns",
+      "resolution_seconds": 5.9e-08
+    },
+    "timezone_offset_seconds": 0
+  },
+  "finished_at": "2026-08-27T19:17:33+00:00",
+  "integrity_note": "Each suite entry carries the SHA-256 and line count of the raw sample file as written by this run. benchmarks/harness/recorder.py's verify() re-checks them; the report generator refuses to render a suite whose raw file does not match, or that this run did not execute.",
+  "interrupted": false,
+  "label": "calibration run on the Cowork Linux sandbox (2 logical cores); NOT the authoritative dataset",
+  "profile": "quick",
+  "profile_sizing": {
+    "b1_primitives": {
+      "repeats": 5,
+      "sweep_memory_kib": [
+        16384,
+        65536
+      ],
+      "sweep_repeats": 2,
+      "sweep_time_cost": [
+        1,
+        3
+      ],
+      "warmup": 1
+    },
+    "b2_token_generation": {
+      "micro_batch": 1000,
+      "micro_repeats": 10,
+      "repeats": 5,
+      "sizes_bytes": [
+        1024,
+        65536,
+        1048576
+      ]
+    },
+    "b3_indexing": {
+      "corpus_sizes": [
+        10,
+        25,
+        50
+      ],
+      "repeats": 3
+    },
+    "b4_upload_rebuild": {
+      "max_documents": 25,
+      "rebuild_checkpoints": [
+        5,
+        10,
+        25
+      ],
+      "rebuild_repeats": 3
+    },
+    "b5_search": {
+      "match_counts": [
+        1,
+        5,
+        10
+      ],
+      "repeats": 10,
+      "scaling_corpus_sizes": [
+        25,
+        50
+      ],
+      "scaling_fixed_k": 5
+    },
+    "b6_storage": {
+      "corpus_size": 25
+    },
+    "corpus": {
+      "seed": 20260827,
+      "vocabulary_size": 4000,
+      "words_per_document": [
+        400,
+        900
+      ],
+      "zipf_exponent": 1.1
+    },
+    "description": "Development and smoke-test sizing. Same code paths and same corpus as `full`, with far fewer documents and repetitions. Its numbers are real measurements but are NOT reportable: the sample counts are too small and the corpus too short to say anything about scaling.",
+    "name": "quick"
+  },
+  "run_id": "20260827T191725Z",
+  "started_at": "2026-08-27T19:17:25+00:00",
+  "suite_metadata": {
+    "b1_primitives": {
+      "argon2_sweep_is_read_only": true,
+      "clock_resolution_seconds": 1.21e-07,
+      "correctness_gates": [
+        "unlock determinism and sub-key independence verified before timing",
+        "HKDF sub-key lengths verified",
+        "AES-GCM round trip and ciphertext length verified at 3 sizes",
+        "PRF determinism and output length verified"
+      ],
+      "implementations_under_test": [
+        "client.keymgmt.derive_master_key",
+        "client.keymgmt.unlock",
+        "client.keymgmt.derive_subkeys",
+        "client.crypto.hkdf_sha256",
+        "client.crypto.aes_gcm_encrypt",
+        "client.crypto.aes_gcm_decrypt",
+        "client.crypto.prf"
+      ],
+      "measures": [
+        "argon2id_derive_master_key",
+        "vault_unlock",
+        "argon2id_parameter_sweep",
+        "hkdf_derive_subkeys",
+        "hkdf_expand",
+        "aes_gcm_encrypt",
+        "aes_gcm_decrypt",
+        "aes_gcm_ciphertext_bytes",
+        "hmac_prf_keyword_input",
+        "hmac_prf_counter_input"
+      ]
+    },
+    "b2_token_generation": {
+      "clock_resolution_seconds": 6.5e-08,
+      "corpus": {
+        "documents": 25,
+        "fingerprint_sha256": "c76bc5039ffa94be2303dd4871069cba7d7f046adba9c55706297b7eca274604",
+        "role": "source of realistic keywords only -- nothing is indexed in this suite"
+      },
+      "correctness_gates": [
+        "every query case normalises to its expected keyword",
+        "token determinism, 32-byte length, keyword distinctness and K1/K2 domain separation verified before timing",
+        "both out-of-scope query shapes verified to raise AmbiguousQueryError"
+      ],
+      "implementations_under_test": [
+        "client.search.normalise_query",
+        "client.search.build_search_token",
+        "client.indexer.keyword_value_key",
+        "client.tokenizer.tokenize"
+      ],
+      "measures": [
+        "normalise_query",
+        "build_search_token",
+        "derive_value_key",
+        "full_client_token_path",
+        "rejected_multi_word_query",
+        "rejected_stopword_only_query"
+      ],
+      "query_cases": [
+        {
+          "case": "shortest_keyword",
+          "keyword": "baho",
+          "keyword_chars": 4,
+          "query": "baho"
+        },
+        {
+          "case": "typical_keyword",
+          "keyword": "mivrito",
+          "keyword_chars": 7,
+          "query": "mivrito"
+        },
+        {
+          "case": "longest_keyword",
+          "keyword": "zaplesniwxuq",
+          "keyword_chars": 12,
+          "query": "zaplesniwxuq"
+        },
+        {
+          "case": "mixed_case_and_punctuation",
+          "keyword": "mivrito",
+          "keyword_chars": 7,
+          "query": "  MIVRITO!  "
+        }
+      ],
+      "rejected_cases": [
+        {
+          "case": "multi_word_query",
+          "query": "annual report summary"
+        },
+        {
+          "case": "stopword_only_query",
+          "query": "the and of"
+        }
+      ]
+    },
+    "b3_indexing": {
+      "clock_resolution_seconds": 1.36e-07,
+      "corpora": [
+        {
+          "distinct_keywords": 1084,
+          "documents": 10,
+          "fingerprint_sha256": "53c8f2057add36d8bce07c61ed6e09698639fe9224f8df06ace431837117d8ee",
+          "keywords_per_document_mean": 191.5,
+          "total_postings": 1915,
+          "total_text_bytes": 44355
+        },
+        {
+          "distinct_keywords": 2020,
+          "documents": 25,
+          "fingerprint_sha256": "c76bc5039ffa94be2303dd4871069cba7d7f046adba9c55706297b7eca274604",
+          "keywords_per_document_mean": 193.88,
+          "total_postings": 4847,
+          "total_text_bytes": 112539
+        },
+        {
+          "distinct_keywords": 3075,
+          "documents": 50,
+          "fingerprint_sha256": "81d10c80075954afe808a9e1151d7ae29d06569d6ad8720e2e3573b66e6a3cfc",
+          "keywords_per_document_mean": 198.42,
+          "total_postings": 9921,
+          "total_text_bytes": 228919
+        }
+      ],
+      "correctness_gates": [
+        "at every corpus size: entry count equals total postings, labels are unique, labels are stable across rebuilds, and values are not (fresh nonces)"
+      ],
+      "implementations_under_test": [
+        "client.tokenizer.tokenize",
+        "client.indexer.build_index"
+      ],
+      "measures": [
+        "tokenize_corpus",
+        "build_index",
+        "tokenize_and_build"
+      ],
+      "probe_keywords_planted": false,
+      "scaling_axes": [
+        "documents",
+        "total_postings"
+      ]
+    }
+  },
+  "suites": {
+    "b1_primitives": {
+      "duration_seconds": 2.356,
+      "error": null,
+      "finished_at": "2026-08-27T19:17:27+00:00",
+      "ran_in_this_run": true,
+      "raw_file": "raw/b1_primitives.jsonl",
+      "raw_line_count": 117,
+      "raw_sha256": "d664cd580344e270a32bd6ee3820475e9a63eacb0f3d63a4a0be874328157aa9",
+      "sample_lines": 117,
+      "started_at": "2026-08-27T19:17:25+00:00",
+      "status": "ok"
+    },
+    "b2_token_generation": {
+      "duration_seconds": 0.99,
+      "error": null,
+      "finished_at": "2026-08-27T19:17:28+00:00",
+      "ran_in_this_run": true,
+      "raw_file": "raw/b2_token_generation.jsonl",
+      "raw_line_count": 216,
+      "raw_sha256": "9aa5b8ef9dc8124e37759425d4d73aa291c4f51a78f30fb22f7f9cc57d6dcd85",
+      "sample_lines": 216,
+      "started_at": "2026-08-27T19:17:27+00:00",
+      "status": "ok"
+    },
+    "b3_indexing": {
+      "duration_seconds": 4.128,
+      "error": null,
+      "finished_at": "2026-08-27T19:17:33+00:00",
+      "ran_in_this_run": true,
+      "raw_file": "raw/b3_indexing.jsonl",
+      "raw_line_count": 66,
+      "raw_sha256": "aaade926a186f91c46277cd5e729ced9da49d88c6dd422ed236e55ed4187ccae",
+      "sample_lines": 66,
+      "started_at": "2026-08-27T19:17:29+00:00",
+      "status": "ok"
+    },
+    "b4_upload_rebuild": {
+      "ran_in_this_run": false,
+      "status": "not_run"
+    },
+    "b5_search": {
+      "ran_in_this_run": false,
+      "status": "not_run"
+    },
+    "b6_storage": {
+      "ran_in_this_run": false,
+      "status": "not_run"
+    }
+  },
+  "wall_clock_seconds": 7.67
+}

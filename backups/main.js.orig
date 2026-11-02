@@ -1,0 +1,360 @@
+/*
+ * web/main.js -- browser UI logic.
+ *
+ * Section 03's "Browser UI: thin shell, no crypto" is enforced here by
+ * what this file does NOT do: it never touches a key, never derives
+ * anything, never talks to the cloud (port 5001) directly. Every
+ * request goes to THIS page's own origin (client_app.py, port 5000),
+ * as a plain fetch() to /api/*. All cryptography happens server-side,
+ * in the trusted client process -- this file only renders whatever
+ * plaintext that process decided to hand back.
+ */
+
+const statusDot = document.getElementById('statusDot');
+const statusText = document.getElementById('statusText');
+const unlockPanel = document.getElementById('unlockPanel');
+const appPanels = document.getElementById('appPanels');
+
+async function api(method, path, body, isFormData) {
+  const opts = { method, headers: {} };
+  if (body !== undefined) {
+    if (isFormData) {
+      opts.body = body;
+    } else {
+      opts.headers['Content-Type'] = 'application/json';
+      opts.body = JSON.stringify(body);
+    }
+  }
+  const resp = await fetch(path, opts);
+  let data = null;
+  try { data = await resp.json(); } catch (e) { /* no body */ }
+  if (!resp.ok) {
+    const message = (data && data.error) ? data.error : `request failed (${resp.status})`;
+    throw new Error(message);
+  }
+  return data;
+}
+
+function setStatusLine(el, message, kind) {
+  el.textContent = message || '';
+  el.className = 'status-line' + (kind ? ' ' + kind : '');
+}
+
+function setLockedUI(unlocked) {
+  statusDot.className = 'status-dot ' + (unlocked ? 'unlocked' : 'locked');
+  statusText.textContent = unlocked ? 'Unlocked' : 'Locked';
+  unlockPanel.classList.toggle('hidden', unlocked);
+  appPanels.classList.toggle('hidden', !unlocked);
+}
+
+async function refreshStatus() {
+  const data = await api('GET', '/api/status');
+  setLockedUI(data.unlocked);
+  return data.unlocked;
+}
+
+// -- unlock / lock -----------------------------------------------------
+
+document.getElementById('unlockForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const passwordInput = document.getElementById('passwordInput');
+  const unlockBtn = document.getElementById('unlockBtn');
+  const statusEl = document.getElementById('unlockStatus');
+  const password = passwordInput.value;
+
+  // Argon2id is deliberately slow (~0.5s by design -- that cost is what
+  // makes offline password guessing expensive). Without this, the UI
+  // just goes quiet for that whole window, which reads as "did it
+  // freeze?" rather than as the security property it actually is.
+  passwordInput.disabled = true;
+  unlockBtn.disabled = true;
+  unlockBtn.textContent = 'Unlocking...';
+  setStatusLine(statusEl, 'Deriving keys (Argon2id)... this ~0.5s delay is deliberate, not lag.', 'loading');
+
+  try {
+    await api('POST', '/api/unlock', { password });
+    passwordInput.value = '';
+    setStatusLine(statusEl, '', '');
+    setLockedUI(true);
+    await Promise.all([loadVaultList(), ]);
+  } catch (err) {
+    setStatusLine(statusEl, 'Unlock failed: ' + err.message, 'error');
+  } finally {
+    passwordInput.disabled = false;
+    unlockBtn.disabled = false;
+    unlockBtn.textContent = 'Unlock';
+  }
+});
+
+document.getElementById('lockBtn').addEventListener('click', async () => {
+  await api('POST', '/api/lock');
+  setLockedUI(false);
+  document.getElementById('vaultList').innerHTML = '';
+  document.getElementById('searchResults').innerHTML = '';
+});
+
+// -- change password -----------------------------------------------------
+
+document.getElementById('changePasswordForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const currentInput = document.getElementById('currentPasswordInput');
+  const newInput = document.getElementById('newPasswordInput');
+  const btn = document.getElementById('changePasswordBtn');
+  const statusEl = document.getElementById('changePasswordStatus');
+
+  const current_password = currentInput.value;
+  const new_password = newInput.value;
+
+  currentInput.disabled = true;
+  newInput.disabled = true;
+  btn.disabled = true;
+  btn.textContent = 'Re-encrypting vault...';
+  // Re-encrypts every document + rebuilds the index server-side (see
+  // client_app.py's api_change_password docstring) -- genuinely O(n)
+  // in vault size, not instant like an ordinary form submit.
+  setStatusLine(statusEl, 'Deriving new keys and re-encrypting every document... this can take a while for a large vault.', 'loading');
+
+  try {
+    const data = await api('POST', '/api/change-password', { current_password, new_password });
+    currentInput.value = '';
+    newInput.value = '';
+    setStatusLine(statusEl, `Password changed. ${data.documents_migrated} document(s) re-encrypted.`, 'ok');
+    // The session is already unlocked under the new keys server-side --
+    // just refresh what's on screen, no re-unlock needed.
+    await loadVaultList();
+  } catch (err) {
+    setStatusLine(statusEl, err.message, 'error');
+  } finally {
+    currentInput.disabled = false;
+    newInput.disabled = false;
+    btn.disabled = false;
+    btn.textContent = 'Change Password';
+  }
+});
+
+// -- upload --------------------------------------------------------------
+
+document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const fileInput = document.getElementById('fileInput');
+  const statusEl = document.getElementById('uploadStatus');
+  if (!fileInput.files.length) return;
+
+  const formData = new FormData();
+  formData.append('file', fileInput.files[0]);
+
+  setStatusLine(statusEl, 'Encrypting and uploading...', '');
+  try {
+    const data = await api('POST', '/api/documents', formData, true);
+    setStatusLine(statusEl, `Uploaded "${data.filename}" (encrypted, indexed).`, 'ok');
+    fileInput.value = '';
+    await loadVaultList();
+  } catch (err) {
+    setStatusLine(statusEl, 'Upload failed: ' + err.message, 'error');
+  }
+});
+
+// -- vault list ------------------------------------------------------------
+
+function renderDocList(container, docs, opts) {
+  container.innerHTML = '';
+  if (!docs.length) {
+    const li = document.createElement('li');
+    li.className = 'empty-note';
+    li.textContent = opts && opts.emptyText ? opts.emptyText : 'Nothing here yet.';
+    container.appendChild(li);
+    return;
+  }
+  docs.forEach((doc) => {
+    const li = document.createElement('li');
+    li.className = 'doc-item' + (doc.filename.startsWith('<undecryptable') ? ' undecryptable' : '');
+    li.dataset.docId = doc.doc_id;
+
+    const left = document.createElement('div');
+    const name = document.createElement('div');
+    name.className = 'doc-name';
+    name.textContent = doc.filename;
+    left.appendChild(name);
+    if (doc.uploaded_at || doc.size !== undefined) {
+      const meta = document.createElement('div');
+      meta.className = 'doc-meta';
+      const parts = [];
+      if (doc.size !== undefined) parts.push(`${doc.size} bytes (ciphertext)`);
+      if (doc.uploaded_at) parts.push(doc.uploaded_at);
+      meta.textContent = parts.join(' · ');
+      left.appendChild(meta);
+    }
+    li.appendChild(left);
+
+    const actions = document.createElement('div');
+    actions.className = 'doc-actions';
+
+    const viewBtn = document.createElement('button');
+    viewBtn.className = 'ghost small';
+    viewBtn.textContent = 'View';
+    viewBtn.addEventListener('click', () => openViewer(doc.doc_id));
+    actions.appendChild(viewBtn);
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'ghost small danger';
+    deleteBtn.textContent = 'Delete';
+    deleteBtn.addEventListener('click', () => deleteDocument(doc, li));
+    actions.appendChild(deleteBtn);
+
+    li.appendChild(actions);
+
+    container.appendChild(li);
+  });
+}
+
+// -- delete ------------------------------------------------------------
+
+async function deleteDocument(doc, li) {
+  // A real confirmation, not a formality: unlike upload (reversible --
+  // just delete and re-upload) this removes the document from the
+  // encrypted index server-side, permanently.
+  const ok = window.confirm(`Delete "${doc.filename}"? This permanently removes it and its entries in the encrypted search index.`);
+  if (!ok) return;
+
+  const originalLabel = li.querySelector('.doc-actions .danger').textContent;
+  li.querySelector('.doc-actions .danger').textContent = 'Deleting...';
+  li.querySelectorAll('.doc-actions button').forEach((b) => { b.disabled = true; });
+
+  try {
+    await api('DELETE', `/api/documents/${doc.doc_id}`);
+    // Refresh both lists rather than just removing this one <li>: the
+    // document may also be showing in the other list (vault list vs.
+    // search results) right now, and refreshing keeps counts/empty
+    // states correct in both places rather than drifting out of sync.
+    await loadVaultList();
+    const searchResults = document.getElementById('searchResults');
+    if (searchResults.children.length && searchResults.querySelector(`[data-doc-id="${doc.doc_id}"]`)) {
+      searchResults.querySelector(`[data-doc-id="${doc.doc_id}"]`).remove();
+    }
+  } catch (err) {
+    alert('Delete failed: ' + err.message);
+    li.querySelector('.doc-actions .danger').textContent = originalLabel;
+    li.querySelectorAll('.doc-actions button').forEach((b) => { b.disabled = false; });
+  }
+}
+
+async function loadVaultList() {
+  const docs = await api('GET', '/api/documents');
+  renderDocList(document.getElementById('vaultList'), docs, { emptyText: 'Vault is empty. Upload a document to get started.' });
+}
+
+document.getElementById('refreshBtn').addEventListener('click', loadVaultList);
+
+// -- search --------------------------------------------------------------
+
+document.getElementById('searchForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const query = document.getElementById('searchInput').value;
+  const statusEl = document.getElementById('searchStatus');
+  const resultsEl = document.getElementById('searchResults');
+
+  const started = performance.now();
+  setStatusLine(statusEl, 'Searching...', '');
+  try {
+    const data = await api('POST', '/api/search', { query });
+    const elapsed = Math.round(performance.now() - started);
+    const keywordLabel = data.keywords.length > 1
+      ? `keywords "${data.keywords.join('" AND "')}"`
+      : `keyword "${data.keywords[0]}"`;
+    setStatusLine(statusEl, `Matched ${keywordLabel} — ${data.results.length} document(s) in ${elapsed} ms.`, 'ok');
+    renderDocList(resultsEl, data.results, { emptyText: 'No documents match that keyword.' });
+  } catch (err) {
+    setStatusLine(statusEl, err.message, 'error');
+    resultsEl.innerHTML = '';
+  }
+});
+
+// -- view / download -------------------------------------------------------
+
+const overlay = document.getElementById('viewerOverlay');
+let currentViewerDoc = null;
+
+async function openViewer(docId) {
+  try {
+    const data = await api('GET', `/api/documents/${docId}`);
+    currentViewerDoc = data;
+    document.getElementById('viewerFilename').textContent = data.filename;
+    let preview;
+    if (data.content !== null) {
+      preview = data.content;
+    } else if (data.is_pdf) {
+      preview = 'PDF document — inline preview not shown here. Click Download to open or save it.';
+    } else if (data.is_zip) {
+      preview = 'Zip archive — inline preview not shown here. Its readable files were indexed for search; click Download to open or save the original archive.';
+    } else {
+      preview = '(binary content, cannot display)';
+    }
+    document.getElementById('viewerContent').textContent = preview;
+    overlay.classList.remove('hidden');
+  } catch (err) {
+    alert('Could not open document: ' + err.message);
+  }
+}
+
+document.getElementById('viewerClose').addEventListener('click', () => {
+  overlay.classList.add('hidden');
+  currentViewerDoc = null;
+});
+
+overlay.addEventListener('click', (e) => {
+  if (e.target === overlay) {
+    overlay.classList.add('hidden');
+    currentViewerDoc = null;
+  }
+});
+
+document.getElementById('viewerDownload').addEventListener('click', () => {
+  if (!currentViewerDoc) return;
+  // Server-side download route (client_app.py decrypts and streams the
+  // real bytes with the right Content-Type/Content-Disposition) rather
+  // than rebuilding a Blob from `content` here -- that field is null
+  // for a PDF, so this is also what makes PDF download actually work.
+  window.location.href = `/api/documents/${currentViewerDoc.doc_id}/download`;
+});
+
+// -- theme (dark / light) ---------------------------------------------------
+//
+// The actual theme choice happens before this file even loads (see the
+// inline script in index.html's <head>, which sets data-theme on <html>
+// before first paint to avoid a flash). This just wires up the toggle
+// button to flip that attribute and remember the choice for next time.
+// Purely cosmetic -- no server request, no effect on the trust boundary.
+
+const themeToggle = document.getElementById('themeToggle');
+
+function currentTheme() {
+  return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+}
+
+function applyThemeButtonLabel(theme) {
+  // Icon shows the theme you'd SWITCH TO, matching common convention.
+  themeToggle.textContent = theme === 'light' ? '\u{1F319}' : '\u{2600}\u{FE0F}';
+  themeToggle.setAttribute('aria-label', theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme');
+  themeToggle.title = themeToggle.getAttribute('aria-label');
+}
+
+function setTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  applyThemeButtonLabel(theme);
+  try { localStorage.setItem('vaultTheme', theme); } catch (e) { /* private browsing, etc. -- toggle still works this session */ }
+}
+
+themeToggle.addEventListener('click', () => {
+  setTheme(currentTheme() === 'light' ? 'dark' : 'light');
+});
+
+applyThemeButtonLabel(currentTheme());
+
+// -- boot ------------------------------------------------------------------
+
+(async function init() {
+  const unlocked = await refreshStatus();
+  if (unlocked) {
+    await loadVaultList();
+  }
+})();

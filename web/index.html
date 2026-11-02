@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Encrypted Cloud Vault</title>
+<script src="theme-init.js"></script>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- ============ AUTH SCREEN ============ -->
+  <div id="authScreen" class="auth-screen hidden">
+    <div class="auth-intro">
+      <div class="brand big">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="28" height="28"><path fill="currentColor" d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3Zm0 6a3 3 0 0 1 1 5.83V17h-2v-3.17A3 3 0 0 1 12 8Z"/></svg>
+        </span>
+        <div>
+          <h1>Encrypted Cloud Vault</h1>
+          <p class="subtitle">Searchable Symmetric Encryption &middot; trusted client / untrusted cloud</p>
+        </div>
+      </div>
+      <ul class="auth-points">
+        <li><b>AES-256-GCM</b> encrypts every file and filename in the trusted client before anything reaches the cloud.</li>
+        <li><b>Argon2id + HKDF-SHA256</b> derive each user's own <code>K_file</code> and <code>K_index</code> from their vault passphrase.</li>
+        <li><b>HMAC-SHA256</b> search tokens let the cloud find matches in an encrypted index without seeing keywords.</li>
+        <li>Account login and vault unlock are <b>separate</b>: your account password never derives a key.</li>
+      </ul>
+    </div>
+
+    <div class="auth-card card">
+      <div class="tabs" role="tablist">
+        <button class="tab active" data-auth-tab="login" role="tab">Log in</button>
+        <button class="tab" data-auth-tab="register" role="tab" id="registerTabBtn">Create account</button>
+        <button class="tab hidden" data-auth-tab="setup" role="tab" id="setupTabBtn">Admin setup</button>
+      </div>
+
+      <form id="loginForm" class="stack auth-pane" data-pane="login">
+        <label>Username<input name="username" autocomplete="username" required></label>
+        <label>Account password<input name="password" type="password" autocomplete="current-password" required></label>
+        <button class="btn primary" type="submit">Log in</button>
+        <p class="hint">After logging in you unlock your vault with a separate <b>vault passphrase</b>.</p>
+      </form>
+
+      <form id="registerForm" class="stack auth-pane hidden" data-pane="register">
+        <label>Username<input name="username" autocomplete="username" required minlength="3" maxlength="32" pattern="[A-Za-z0-9_.\-]{3,32}"></label>
+        <label>Account password <span class="muted">(min. 8 characters)</span><input name="password" type="password" autocomplete="new-password" required minlength="8"></label>
+        <label>Confirm password<input name="confirm" type="password" autocomplete="new-password" required minlength="8"></label>
+        <button class="btn primary" type="submit">Create account</button>
+        <p class="hint">Creates a regular user account and an empty, private cloud vault. Your vault passphrase is chosen on first unlock.</p>
+      </form>
+
+      <form id="setupForm" class="stack auth-pane hidden" data-pane="setup">
+        <p class="hint">No administrator exists yet. Enter the <b>one-time setup token</b> printed in the trusted client's terminal, then choose the administrator's credentials. This form stops working once an administrator exists.</p>
+        <label>Setup token<input name="setup_token" autocomplete="off" required></label>
+        <label>Admin username<input name="username" autocomplete="username" required minlength="3" maxlength="32"></label>
+        <label>Admin password<input name="password" type="password" autocomplete="new-password" required minlength="8"></label>
+        <button class="btn primary" type="submit">Create administrator</button>
+      </form>
+      <p id="authStatus" class="status-line" aria-live="polite"></p>
+    </div>
+  </div>
+
+  <!-- ============ APP SHELL ============ -->
+  <div id="appShell" class="app-shell hidden">
+    <aside id="sidebar" class="sidebar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3Zm0 6a3 3 0 0 1 1 5.83V17h-2v-3.17A3 3 0 0 1 12 8Z"/></svg>
+        </span>
+        <div><h1>Cloud Vault</h1><p class="subtitle">SSE demo</p></div>
+      </div>
+      <nav id="nav" class="nav" aria-label="Main navigation"></nav>
+      <div class="sidebar-foot">
+        <div class="boundary-note">
+          <span class="dot teal"></span> Trusted client &middot; port <span id="clientPort">5000</span><br>
+          <span class="dot amber"></span> Untrusted cloud &middot; port 5001
+        </div>
+      </div>
+    </aside>
+
+    <div class="main-col">
+      <header class="topbar">
+        <button id="menuBtn" class="btn ghost icon-only menu-btn" aria-label="Open navigation">&#9776;</button>
+        <h2 id="viewTitle" class="view-title">Dashboard</h2>
+        <div class="topbar-right">
+          <span id="vaultPill" class="pill"></span>
+          <button id="lockBtn" class="btn ghost small hidden">Lock vault</button>
+          <div class="who">
+            <span id="whoName" class="who-name"></span>
+            <span id="whoRole" class="badge"></span>
+          </div>
+          <button id="themeBtn" class="btn ghost icon-only" title="Toggle light/dark" aria-label="Toggle theme">&#9680;</button>
+          <button id="logoutBtn" class="btn ghost small">Log out</button>
+        </div>
+      </header>
+      <main id="view" class="view" tabindex="-1"></main>
+    </div>
+  </div>
+
+  <div id="modalRoot"></div>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+
+<script src="main.js"></script>
+</body>
+</html>

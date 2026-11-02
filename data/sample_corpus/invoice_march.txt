@@ -1,0 +1,11 @@
+Invoice - March
+
+Invoice number 2026-0314, issued to the Department of Computer Science.
+
+Line items:
+  Cloud storage, 200 gigabytes, one month .......... 18.00
+  Compute time for benchmark runs .................. 42.50
+  Backup retention .................................  6.25
+
+Total due: 66.75. Payment terms are thirty days from the invoice date. Please
+quote the invoice number on any transfer.

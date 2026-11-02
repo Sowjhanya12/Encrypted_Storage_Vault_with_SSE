@@ -1,0 +1,12 @@
+Report Outline
+
+1. Motivation: why encryption alone breaks search.
+2. Background: symmetric encryption, pseudorandom functions, and the searchable
+   encryption problem.
+3. Design: the trust boundary, key derivation, and the encrypted index.
+4. Implementation: two processes, one of which is treated as an adversary.
+5. Security analysis: the threat model and the exact leakage profile.
+6. Performance: measured cost of indexing, uploading and searching.
+7. Limitations and future work.
+
+Section five and section six carry the most marks and should be written first.

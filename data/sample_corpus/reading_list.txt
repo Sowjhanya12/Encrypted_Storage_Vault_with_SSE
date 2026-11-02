@@ -1,0 +1,11 @@
+Reading List
+
+Cash, Jaeger, Jarecki, Jutla, Krawczyk, Rosu and Steiner, "Dynamic Searchable
+Encryption in Very Large Databases", 2014. Source of the base construction used
+in this project.
+
+Islam, Kuzu and Kantarcioglu on access pattern leakage, and Cash et al. on leakage
+abuse attacks. Both are relevant to the analysis chapter and to the viva question
+about whether the server could recover keywords.
+
+RFC 9106 for argon2, and NIST SP 800-38D for gcm mode.

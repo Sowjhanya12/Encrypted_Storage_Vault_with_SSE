@@ -1,0 +1,14 @@
+# Phase 1 (crypto core)
+cryptography>=41
+argon2-cffi>=23
+pytest>=7
+
+# Phase 2 (cloud storage service)
+flask>=3
+
+# Phase 5 (client app -- talks to the cloud service over HTTP)
+requests>=2.31
+
+# PDF upload support (client/textextract.py) -- pure-Python PDF text
+# extraction only, no system dependency (e.g. poppler) required
+pypdf>=4

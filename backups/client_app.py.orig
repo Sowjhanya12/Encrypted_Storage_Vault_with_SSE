@@ -1,0 +1,895 @@
+"""
+client/client_app.py -- the trusted client's own Flask process
+(Section 11: "Flask: serves web/, relays ciphertext to cloud").
+
+Section 02's trust boundary made concrete: this process is the ONLY
+place in the whole system that ever holds a derived key or sees
+plaintext. It serves the browser UI (web/) and orchestrates every
+operation by calling:
+
+  - client/keymgmt.py, client/crypto.py                    -- all cryptography
+  - client/tokenizer.py, client/indexer.py, client/search.py -- the SSE scheme
+  - client/cloud_client.py                                  -- the ONLY way
+    this process ever talks to the untrusted cloud, and only in
+    ciphertext and opaque tokens
+
+The browser (web/main.js) never calls the cloud directly and never
+receives a key. It only ever talks to THIS process's /api/* routes,
+which return plaintext (decrypted filenames, document content, search
+results) because all the cryptography happens here, in this Python
+process -- never in JavaScript, matching Section 03's "Browser UI:
+thin shell, no crypto".
+
+Session model (a deliberate, documented simplification): this is a
+single-operator local demo, matching the architecture's own framing
+throughout (one trusted client, one vault, no multi-tenant concept
+anywhere in the doc). The unlocked KeySet is held in ONE process-wide
+variable, guarded by a lock for thread-safety, not per-browser-session
+state. Anyone who can reach this process's HTTP port while it is
+unlocked can use the vault without re-entering the password -- this
+matches the doc's threat model (the client is fully trusted; nothing
+in Stage 1 threat-models the trusted client's own local interface)
+but is a real, named limitation for anything beyond a local demo. See
+the Phase 5 report for how this is framed.
+
+Password verifier (added post-Phase-5, security fix H1/H2): the
+paragraph above described Phases 1-5 as shipped, and is exactly why an
+incorrect password used to be discovered only much later -- by which
+point a follow-up upload's index rebuild had already silently
+destroyed the real encrypted index (H1), and a missing `kdf_salt` row
+had already silently minted a brand-new vault identity (H2). An
+independent security audit (docs/security_audit_opus_phase6_readiness.md)
+found both were reachable with nothing more than a typo or a deleted
+row -- see project memory phase6_security_audit_opus.md. This module
+now stores one extra, non-secret meta row -- `kdf_verifier`, an
+AES-GCM encryption of a fixed constant under K_index -- created ONLY
+the very first time a vault is ever unlocked (when BOTH `kdf_salt` and
+`kdf_verifier` are absent). Every later unlock must decrypt it:
+failure means the password is wrong and unlock is refused outright
+(401) before any key ever reaches an upload or index rebuild; if only
+ONE of the two rows is present, the vault's KDF metadata is incomplete
+or corrupted, and unlock refuses to proceed rather than minting a new
+identity over it (409). This is a deliberate, minimal addition to the
+approved design -- not scope creep -- scoped narrowly to closing H1
+and H2. It adds no user accounts, sessions, or other authentication
+concept, and every other design decision in this file is unchanged.
+
+Fix F1 (post-audit follow-up, closes a gap the H2 fix above left
+open): the "both rows absent" branch is not automatically a fresh
+vault. An attacker (or an operator's mistake) can delete BOTH
+`kdf_salt` and `kdf_verifier` from an existing vault that already has
+documents, which the original H2 fix would still treat as "genuinely
+new" and happily bootstrap a brand-new identity over -- any password
+would then "unlock" a vault whose real documents are permanently
+unreadable. Unlock now checks whether the cloud already holds any
+documents before it is willing to bootstrap: if it does, both-absent
+is treated exactly like the single-row-missing case (409, fail
+closed, no password accepted) instead of as a fresh vault. Only a
+cloud with BOTH rows absent AND zero documents may bootstrap.
+"""
+
+from __future__ import annotations
+
+import os
+import threading
+
+from flask import Flask, Response, jsonify, request
+
+from . import cloud_client
+from .crypto import (
+    NONCE_SIZE,
+    TAG_SIZE,
+    DecryptionError,
+    aes_gcm_decrypt,
+    aes_gcm_encrypt,
+)
+from .cloud_client import CloudError, CloudUnavailableError
+from .indexer import build_index
+from .keymgmt import generate_salt, unlock as derive_keys
+from .search import (
+    AmbiguousQueryError,
+    build_search_token,
+    decrypt_search_results,
+    normalise_conjunctive_query,
+)
+from .textextract import extract_indexable_text, is_pdf, is_zip
+from .tokenizer import tokenize
+
+WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
+
+# -- KDF metadata verifier (security fix H1/H2) -----------------------------
+# See the module docstring's "Password verifier" section above. Kept
+# entirely within this file because H1 and H2 are both Phase-5
+# "operational layer" bugs per the audit -- Phase 1's crypto core and
+# Phase 3/4's K1/K2 index/search contract are untouched by this fix.
+_VERIFIER_META_KEY = "kdf_verifier"
+_VERIFIER_PLAINTEXT = b"vault-verifier:v1"
+
+
+class VaultMetadataError(Exception):
+    """Raised when the cloud's KDF metadata (`kdf_salt` / `kdf_verifier`)
+    is in a state that must never be unlocked from: exactly one of the
+    two mandatory rows present, OR both rows absent while the vault
+    already holds documents. Either state can only mean a deleted/
+    corrupted row, a partial write, or a both-rows-deletion attack --
+    never a genuinely fresh vault (a genuinely fresh vault has BOTH
+    rows absent AND zero documents) -- so unlock refuses to either
+    guess or silently mint a new identity over the old one (H2/F1)."""
+
+
+class IndexRebuildError(Exception):
+    """Raised by _rebuild_and_push_index when at least one existing
+    document in the corpus failed to decrypt during a rebuild. Pushing
+    a smaller index in that case would silently destroy index coverage
+    for every document that failed (H1) -- so the whole rebuild is
+    aborted instead and the cloud's current index is left untouched."""
+
+
+# -- process-wide unlocked-vault state (see module docstring) --------------
+_state_lock = threading.Lock()
+_current_keys = None  # keymgmt.KeySet | None
+
+
+def _require_unlocked():
+    """Returns the current KeySet, or None if the vault is locked.
+    Every route that touches keys or plaintext calls this first."""
+    with _state_lock:
+        return _current_keys
+
+
+def _split_blob(blob: bytes):
+    """The one place this process slices an AES-GCM blob into the
+    cloud schema's three columns -- identical to what
+    tests/test_integration.py has done by hand since Phase 2."""
+    return blob[:NONCE_SIZE], blob[NONCE_SIZE:-TAG_SIZE], blob[-TAG_SIZE:]
+
+
+def _decrypt_filename(keys, enc_name: bytes) -> str:
+    """Best-effort filename decrypt: returns a clearly-marked
+    placeholder instead of raising, so ONE bad/wrong-key entry does
+    not take down an entire vault-list or search-result response --
+    the caller can still show the rest and let the user notice
+    something is wrong with that one row."""
+    try:
+        return aes_gcm_decrypt(keys.k_file, enc_name).decode("utf-8")
+    except (DecryptionError, UnicodeDecodeError):
+        return "<undecryptable -- wrong password, or corrupted/tampered data>"
+
+
+def _rebuild_and_push_index(keys, exclude_doc_id: "str | None" = None) -> None:
+    """Re-derives the WHOLE index from the current corpus and pushes
+    it as an atomic replacement. Called after every successful upload,
+    and by api_delete_document (see that route's docstring for why it
+    calls this BEFORE removing the document from cloud storage, not
+    after).
+
+    Static-index cost, stated plainly: this re-fetches and
+    re-decrypts every document in the vault on every upload (O(n) in
+    corpus size). Fine at course-project scale; a production system
+    wanting to avoid this would need either a persisted plaintext-
+    keyword cache or a genuinely incremental (forward-private) index --
+    both out of scope per Section 10's static-index decision.
+
+    `exclude_doc_id`: when given, that document is treated as already
+    gone for this rebuild even though it may still physically exist in
+    cloud storage at call time -- this is what lets api_delete_document
+    remove a document's keywords from the searchable index as a
+    separate, safely-ordered step from deleting its ciphertext.
+    """
+    docs_meta = cloud_client.list_documents()
+    documents = {}
+    failed_doc_ids = []
+    for meta in docs_meta:
+        if meta["doc_id"] == exclude_doc_id:
+            continue
+        doc = cloud_client.fetch_document(meta["doc_id"])
+        if doc is None:
+            continue  # deleted between listing and fetching -- skip, not fatal
+        blob = doc["nonce"] + doc["ciphertext"] + doc["tag"]
+        try:
+            plaintext = aes_gcm_decrypt(keys.k_file, blob)
+        except DecryptionError:
+            # Security fix H1: this USED to `continue` here, silently
+            # contributing zero keywords for this document and letting
+            # the rebuild finish "successfully" with a smaller index
+            # that then destructively replaced the real one. With the
+            # api_unlock verifier (H2) in place this should now be
+            # unreachable via a wrong password -- keys are checked
+            # before any upload ever happens -- but it can still happen
+            # from a genuinely corrupted/tampered document, so the
+            # rebuild itself stays defensive: record the failure and
+            # keep scanning (so the error below can report every
+            # affected doc_id at once), but never build or push a
+            # partial index.
+            failed_doc_ids.append(meta["doc_id"])
+            continue
+
+        # PDF-support addition: same idea as the DecryptionError case
+        # above -- decryption succeeding but extraction failing should
+        # not happen for anything uploaded through api_upload_document
+        # (which validates with this exact function first), but a
+        # rebuild stays defensive rather than assuming that can never
+        # change; treat it as a failed document, not a silent zero-
+        # keyword contribution.
+        text = extract_indexable_text(plaintext)
+        if text is None:
+            failed_doc_ids.append(meta["doc_id"])
+            continue
+        documents[meta["doc_id"]] = tokenize(text)
+
+    if failed_doc_ids:
+        # Abort the whole rebuild rather than replacing the cloud's
+        # current (complete, correct) index with an incomplete one.
+        # cloud_client.replace_index() is never called on this path --
+        # the existing sse_index table is left exactly as it was.
+        raise IndexRebuildError(
+            f"{len(failed_doc_ids)} of {len(docs_meta)} document(s) in the "
+            f"vault failed to decrypt during index rebuild and were "
+            f"excluded: {failed_doc_ids}. Refusing to replace the "
+            f"encrypted index with an incomplete one -- the existing "
+            f"index was left unchanged."
+        )
+
+    entries = build_index(keys.k_index, documents)
+    cloud_client.replace_index([(e.label, e.value) for e in entries])
+
+
+def create_app() -> Flask:
+    app = Flask(__name__, static_folder=WEB_DIR, static_url_path="")
+
+    @app.get("/")
+    def index_page():
+        return app.send_static_file("index.html")
+
+    # -- vault lifecycle -----------------------------------------------
+
+    @app.get("/api/status")
+    def api_status():
+        return jsonify({"unlocked": _require_unlocked() is not None})
+
+    @app.post("/api/unlock")
+    def api_unlock():
+        body = request.get_json(silent=True) or {}
+        password = body.get("password")
+        if not isinstance(password, str) or password == "":
+            return jsonify({"error": "password must be a non-empty string"}), 400
+
+        try:
+            salt = cloud_client.get_meta("kdf_salt")
+            verifier = cloud_client.get_meta(_VERIFIER_META_KEY)
+        except CloudUnavailableError as exc:
+            return jsonify({"error": str(exc)}), 502
+        except CloudError as exc:
+            return jsonify({"error": str(exc)}), 502
+
+        if salt is None and verifier is None:
+            # Security fix F1/H2 (both-rows-missing case): both
+            # mandatory KDF rows are absent. That is legitimate ONLY
+            # for a genuinely fresh vault that has never stored
+            # anything -- a document can only exist if some earlier
+            # unlock already succeeded, and the ONLY way to reach a
+            # successful unlock is through this same branch (fresh) or
+            # the "both present" branch below, both of which require
+            # kdf_salt/kdf_verifier to exist afterward. So if the cloud
+            # already holds documents, both rows being absent here can
+            # only mean they were deleted/lost from an EXISTING vault
+            # (the audit's exact both-missing attack) -- minting a new
+            # identity over that state would let ANY password "unlock"
+            # a vault whose real documents are now unreadable forever.
+            # Check for that BEFORE bootstrapping anything.
+            try:
+                existing_docs = cloud_client.list_documents()
+            except CloudUnavailableError as exc:
+                return jsonify({"error": str(exc)}), 502
+            except CloudError as exc:
+                return jsonify({"error": str(exc)}), 502
+
+            if existing_docs:
+                return jsonify({
+                    "error": (
+                        "vault key-derivation metadata is missing entirely "
+                        "('kdf_salt' and 'kdf_verifier' are both absent) but "
+                        "the vault already contains documents. This is not "
+                        "a fresh vault -- refusing to mint a new vault "
+                        "identity over existing encrypted data. No password "
+                        "will unlock this vault until its KDF metadata is "
+                        "restored."
+                    )
+                }), 409
+
+            # Genuinely fresh vault confirmed: no documents AND no KDF
+            # metadata at all. This is the ONLY branch in the entire
+            # app allowed to mint a new vault identity. Not part of
+            # Section 07 flow A (which assumes a salt already exists)
+            # but required to make that flow possible the very first
+            # time.
+            salt = generate_salt()
+            try:
+                keys = derive_keys(password, salt)
+            except ValueError as exc:
+                return jsonify({"error": f"could not derive vault keys: {exc}"}), 500
+            verifier = aes_gcm_encrypt(keys.k_index, _VERIFIER_PLAINTEXT)
+            try:
+                cloud_client.set_meta("kdf_salt", salt)
+                cloud_client.set_meta(_VERIFIER_META_KEY, verifier)
+            except CloudUnavailableError as exc:
+                return jsonify({"error": str(exc)}), 502
+            except CloudError as exc:
+                return jsonify({"error": str(exc)}), 502
+        elif salt is None or verifier is None:
+            # Security fix H2: exactly one of the two mandatory rows is
+            # missing -- a deleted row, a partial write, tampering. This
+            # is NOT a fresh vault (a fresh vault has both absent), so
+            # unlock must not guess, and must not bootstrap a new salt
+            # over an existing vault's real identity. Fail closed.
+            missing = "kdf_salt" if salt is None else _VERIFIER_META_KEY
+            return jsonify({
+                "error": (
+                    f"vault key-derivation metadata is incomplete: "
+                    f"'{missing}' is missing while the other KDF row is "
+                    f"present. Refusing to unlock or create a new vault "
+                    f"identity over the existing one."
+                )
+            }), 409
+        else:
+            try:
+                keys = derive_keys(password, salt)
+            except ValueError as exc:
+                # e.g. a corrupted salt whose length no longer matches
+                # SALT_SIZE -- fail closed rather than crashing (500).
+                return jsonify({
+                    "error": f"vault key-derivation metadata is corrupt: {exc}"
+                }), 409
+            try:
+                aes_gcm_decrypt(keys.k_index, verifier)
+            except DecryptionError:
+                # Security fix H1/H2: this is the check that used not to
+                # exist. A wrong password (or a corrupted/substituted
+                # salt or verifier) is now caught HERE, before any key
+                # ever reaches an upload or index rebuild -- closing the
+                # entry condition for H1's destructive rebuild.
+                return jsonify({"error": "incorrect password"}), 401
+
+        global _current_keys
+        with _state_lock:
+            _current_keys = keys
+        return jsonify({"status": "unlocked"}), 200
+
+    @app.post("/api/lock")
+    def api_lock():
+        global _current_keys
+        with _state_lock:
+            if _current_keys is not None:
+                _current_keys.wipe()
+            _current_keys = None
+        return jsonify({"status": "locked"}), 200
+
+    @app.post("/api/change-password")
+    def api_change_password():
+        """Rotates the vault's password: a fresh salt, a freshly
+        derived KeySet, every document re-encrypted under the new
+        K_file, the whole search index rebuilt under the new K_index,
+        and finally the KDF metadata (kdf_salt/kdf_verifier) updated to
+        match. Requires the CURRENT password even though the vault is
+        already unlocked -- a deliberate re-authentication step for a
+        security-sensitive action, independent of (and not simply
+        trusting) the process-wide unlocked session.
+
+        Two-phase, fail-fast-before-writing (the H1 abort philosophy
+        applied one step earlier): phase one decrypts and tokenizes
+        EVERY document under the OLD keys, entirely in memory, writing
+        nothing anywhere. Only if that whole pass succeeds does phase
+        two begin re-encrypting and pushing. This guarantees a
+        validation failure (a corrupted/tampered document, found before
+        phase two starts) can NEVER itself leave the vault
+        half-migrated -- but it does not, and structurally cannot,
+        make phase two itself atomic.
+
+        Documented limitation, honestly, not hidden: unlike a single
+        AES-GCM call, this is O(n) HTTP round-trips to the cloud (one
+        PUT per document, same rebuild-cost philosophy as
+        _rebuild_and_push_index -- see that function's docstring and
+        architecture.html Section 07). If the cloud connection drops
+        DURING phase two, after some documents have already been
+        overwritten with new-key ciphertext but before kdf_salt/
+        kdf_verifier are updated (the LAST step, deliberately), the
+        vault is left in a genuinely split state: unlocking with the
+        OLD password still succeeds (the verifier hasn't changed yet)
+        but shows the already-migrated documents as
+        "<undecryptable...>"; unlocking with the NEW password fails
+        outright (the verifier still names the old identity). There is
+        no way to make an O(n) multi-request migration atomic without
+        either a distributed transaction the cloud side does not
+        implement, or the envelope-encryption redesign named as future
+        work in Section 04 (wrap a random per-document key with the
+        master key, so rotation only ever re-wraps small key blobs
+        instead of re-encrypting every document). Accepted, scoped
+        trade-off for this project, not an oversight.
+        """
+        keys = _require_unlocked()
+        if keys is None:
+            return jsonify({"error": "vault is locked"}), 401
+
+        body = request.get_json(silent=True) or {}
+        current_password = body.get("current_password")
+        new_password = body.get("new_password")
+        if not isinstance(current_password, str) or current_password == "":
+            return jsonify({"error": "current_password must be a non-empty string"}), 400
+        if not isinstance(new_password, str) or new_password == "":
+            return jsonify({"error": "new_password must be a non-empty string"}), 400
+
+        try:
+            salt = cloud_client.get_meta("kdf_salt")
+            verifier = cloud_client.get_meta(_VERIFIER_META_KEY)
+        except CloudUnavailableError as exc:
+            return jsonify({"error": str(exc)}), 502
+        except CloudError as exc:
+            return jsonify({"error": str(exc)}), 502
+        if salt is None or verifier is None:
+            # Same fail-closed posture as unlock's H2/F1 branches: the
+            # vault was unlocked a moment ago, so these rows existing
+            # is the expected state -- one or both missing now means a
+            # deleted row or corruption happened concurrently, not a
+            # normal condition this route should paper over.
+            return jsonify({
+                "error": "vault KDF metadata is missing or incomplete -- refusing to rotate the password"
+            }), 409
+
+        # Independent re-authentication: derive fresh keys from the
+        # SUPPLIED current_password and check them against the stored
+        # verifier, rather than trusting the process-wide _current_keys
+        # to still correspond to whatever the caller claims. This also
+        # means the crypto below never depends on _current_keys being
+        # in sync with reality -- only on what was just verified.
+        try:
+            old_keys = derive_keys(current_password, salt)
+        except ValueError as exc:
+            return jsonify({"error": f"could not derive vault keys: {exc}"}), 500
+        try:
+            aes_gcm_decrypt(old_keys.k_index, verifier)
+        except DecryptionError:
+            return jsonify({"error": "current password is incorrect"}), 401
+
+        # Phase one: decrypt + tokenize the WHOLE corpus under the OLD
+        # keys, in memory only. Nothing is written in this phase.
+        try:
+            docs_meta = cloud_client.list_documents()
+        except CloudUnavailableError as exc:
+            return jsonify({"error": str(exc)}), 502
+        except CloudError as exc:
+            return jsonify({"error": str(exc)}), 502
+
+        migrated = {}  # doc_id -> {"filename": bytes, "content": bytes, "keywords": set[str]}
+        failed_doc_ids = []
+        for meta in docs_meta:
+            try:
+                doc = cloud_client.fetch_document(meta["doc_id"])
+            except CloudUnavailableError as exc:
+                return jsonify({"error": str(exc)}), 502
+            except CloudError as exc:
+                return jsonify({"error": str(exc)}), 502
+            if doc is None:
+                continue  # deleted between listing and fetching -- skip, not fatal
+
+            blob = doc["nonce"] + doc["ciphertext"] + doc["tag"]
+            try:
+                filename_bytes = aes_gcm_decrypt(old_keys.k_file, doc["enc_name"])
+                content_bytes = aes_gcm_decrypt(old_keys.k_file, blob)
+            except DecryptionError:
+                failed_doc_ids.append(meta["doc_id"])
+                continue
+
+            text = extract_indexable_text(content_bytes)
+            if text is None:
+                failed_doc_ids.append(meta["doc_id"])
+                continue
+
+            migrated[meta["doc_id"]] = {
+                "filename": filename_bytes,
+                "content": content_bytes,
+                "keywords": tokenize(text),
+            }
+
+        if failed_doc_ids:
+            raise_msg = (
+                f"{len(failed_doc_ids)} of {len(docs_meta)} document(s) failed to "
+                f"decrypt under the current password during validation and were "
+                f"excluded: {failed_doc_ids}. Password was NOT changed -- refusing "
+                f"to migrate a corpus it could not fully validate first."
+            )
+            return jsonify({"error": raise_msg}), 500
+
+        # Phase two: only now, having confirmed every document decrypts
+        # cleanly, generate the new identity and start writing.
+        new_salt = generate_salt()
+        try:
+            new_keys = derive_keys(new_password, new_salt)
+        except ValueError as exc:
+            return jsonify({"error": f"could not derive vault keys: {exc}"}), 500
+
+        for doc_id, plain in migrated.items():
+            name_blob = aes_gcm_encrypt(new_keys.k_file, plain["filename"])
+            file_blob = aes_gcm_encrypt(new_keys.k_file, plain["content"])
+            nonce, ciphertext, tag = _split_blob(file_blob)
+            try:
+                cloud_client.replace_document(doc_id, name_blob, nonce, ciphertext, tag)
+            except CloudUnavailableError as exc:
+                return jsonify({
+                    "error": (
+                        f"password rotation interrupted while re-encrypting documents: "
+                        f"{exc}. The vault may now be in a MIXED state -- some documents "
+                        f"re-encrypted under the new password, others still under the old "
+                        f"one -- and kdf_salt/kdf_verifier were NOT yet updated, so the OLD "
+                        f"password still unlocks the vault (already-migrated documents will "
+                        f"show as undecryptable until this is retried and completes)."
+                    )
+                }), 502
+            except CloudError as exc:
+                return jsonify({"error": str(exc)}), 502
+
+        entries = build_index(new_keys.k_index, {doc_id: plain["keywords"] for doc_id, plain in migrated.items()})
+        try:
+            cloud_client.replace_index([(e.label, e.value) for e in entries])
+        except CloudUnavailableError as exc:
+            return jsonify({
+                "error": (
+                    f"password rotation interrupted while rebuilding the index: {exc}. "
+                    f"Documents were re-encrypted under the new password, but "
+                    f"kdf_salt/kdf_verifier were NOT yet updated -- retry this request "
+                    f"with the SAME new password to finish (the old password's verifier "
+                    f"is still in place, but its documents are already unreadable under "
+                    f"it; do not attempt to unlock with the old password in this state)."
+                )
+            }), 502
+        except CloudError as exc:
+            return jsonify({"error": str(exc)}), 502
+
+        # LAST step, deliberately: the point of no return. Everything
+        # above this line is retriable; this line is what actually
+        # flips the vault's identity to the new password.
+        new_verifier = aes_gcm_encrypt(new_keys.k_index, _VERIFIER_PLAINTEXT)
+        try:
+            cloud_client.set_meta("kdf_salt", new_salt)
+            cloud_client.set_meta(_VERIFIER_META_KEY, new_verifier)
+        except CloudUnavailableError as exc:
+            return jsonify({
+                "error": (
+                    f"password rotation interrupted at the final step (updating KDF "
+                    f"metadata): {exc}. Documents and the index were already migrated "
+                    f"to the new password -- retry this request with the SAME new "
+                    f"password to finish; do not attempt to unlock with the old "
+                    f"password."
+                )
+            }), 502
+        except CloudError as exc:
+            return jsonify({"error": str(exc)}), 502
+
+        global _current_keys
+        with _state_lock:
+            _current_keys.wipe()
+            _current_keys = new_keys
+        return jsonify({"status": "password changed", "documents_migrated": len(migrated)}), 200
+
+    # -- documents -------------------------------------------------------
+
+    @app.post("/api/documents")
+    def api_upload_document():
+        keys = _require_unlocked()
+        if keys is None:
+            return jsonify({"error": "vault is locked"}), 401
+
+        if "file" not in request.files:
+            return jsonify({"error": "no file provided (multipart field name must be 'file')"}), 400
+        file = request.files["file"]
+        if not file.filename:
+            return jsonify({"error": "uploaded file has no filename"}), 400
+
+        raw_bytes = file.read()
+        if extract_indexable_text(raw_bytes) is None:
+            return jsonify(
+                {
+                    "error": "unsupported file type -- only UTF-8 text files, PDFs "
+                    "(with a readable text layer; not one encrypted with its own "
+                    "password), and zip archives (of files this project can read; "
+                    "not a Word/Excel/PowerPoint file, which is a zip internally but "
+                    "not one this project indexes) can be uploaded. This project's "
+                    "SSE index is built over readable keyword content."
+                }
+            ), 400
+
+        doc_id = os.urandom(16).hex()
+        file_blob = aes_gcm_encrypt(keys.k_file, raw_bytes)
+        name_blob = aes_gcm_encrypt(keys.k_file, file.filename.encode("utf-8"))
+        nonce, ciphertext, tag = _split_blob(file_blob)
+
+        try:
+            cloud_client.push_document(doc_id, name_blob, nonce, ciphertext, tag)
+        except CloudUnavailableError as exc:
+            return jsonify({"error": str(exc)}), 502
+        except CloudError as exc:
+            return jsonify({"error": str(exc)}), 502
+
+        try:
+            _rebuild_and_push_index(keys)
+        except IndexRebuildError as exc:
+            # Security fix H1: the document itself is safely stored
+            # (the push above already succeeded), but the encrypted
+            # search index could not be safely rebuilt and was left
+            # exactly as it was -- never replaced with an incomplete
+            # one. Reported loudly rather than silently, unlike before.
+            return jsonify({
+                "doc_id": doc_id,
+                "error": (
+                    f"document stored, but the encrypted search index "
+                    f"could not be safely rebuilt and was left unchanged: {exc}"
+                )
+            }), 500
+        except CloudUnavailableError as exc:
+            return jsonify({"error": str(exc)}), 502
+        except CloudError as exc:
+            return jsonify({"error": str(exc)}), 502
+
+        return jsonify({"doc_id": doc_id, "filename": file.filename}), 201
+
+    @app.get("/api/documents")
+    def api_list_documents():
+        keys = _require_unlocked()
+        if keys is None:
+            return jsonify({"error": "vault is locked"}), 401
+
+        try:
+            docs = cloud_client.list_documents()
+        except CloudUnavailableError as exc:
+            return jsonify({"error": str(exc)}), 502
+
+        return jsonify(
+            [
+                {
+                    "doc_id": d["doc_id"],
+                    "filename": _decrypt_filename(keys, d["enc_name"]),
+                    "size": d["size"],
+                    "uploaded_at": d["uploaded_at"],
+                }
+                for d in docs
+            ]
+        ), 200
+
+    @app.get("/api/documents/<doc_id>")
+    def api_get_document(doc_id: str):
+        keys = _require_unlocked()
+        if keys is None:
+            return jsonify({"error": "vault is locked"}), 401
+
+        try:
+            doc = cloud_client.fetch_document(doc_id)
+        except CloudUnavailableError as exc:
+            return jsonify({"error": str(exc)}), 502
+        if doc is None:
+            return jsonify({"error": "not found"}), 404
+
+        blob = doc["nonce"] + doc["ciphertext"] + doc["tag"]
+        try:
+            filename = aes_gcm_decrypt(keys.k_file, doc["enc_name"]).decode("utf-8")
+            content_bytes = aes_gcm_decrypt(keys.k_file, blob)
+        except DecryptionError:
+            return jsonify(
+                {
+                    "error": "decryption failed -- wrong vault password, or this "
+                    "file's stored ciphertext was corrupted or tampered with"
+                }
+            ), 422
+
+        pdf_file = is_pdf(content_bytes)
+        zip_file = is_zip(content_bytes)
+        content = None
+        if not pdf_file and not zip_file:
+            try:
+                content = content_bytes.decode("utf-8")
+            except UnicodeDecodeError:
+                pass  # some other binary that slipped past upload validation
+
+        return jsonify({
+            "doc_id": doc_id,
+            "filename": filename,
+            "content": content,
+            "is_pdf": pdf_file,
+            "is_zip": zip_file,
+        }), 200
+
+    @app.get("/api/documents/<doc_id>/download")
+    def api_download_document(doc_id: str):
+        """Returns a document's decrypted bytes as a real file download,
+        instead of JSON -- the only sane way to hand back binary content
+        such as a PDF (base64-in-JSON would work but adds ~33% overhead
+        and no browser can just open it). Same trust boundary as every
+        other route: decryption happens here, in the trusted client,
+        never in the browser; this is just a different response
+        encoding for the same already-unlocked-only plaintext access
+        api_get_document already grants.
+        """
+        keys = _require_unlocked()
+        if keys is None:
+            return jsonify({"error": "vault is locked"}), 401
+
+        try:
+            doc = cloud_client.fetch_document(doc_id)
+        except CloudUnavailableError as exc:
+            return jsonify({"error": str(exc)}), 502
+        if doc is None:
+            return jsonify({"error": "not found"}), 404
+
+        blob = doc["nonce"] + doc["ciphertext"] + doc["tag"]
+        try:
+            filename = aes_gcm_decrypt(keys.k_file, doc["enc_name"]).decode("utf-8")
+            content_bytes = aes_gcm_decrypt(keys.k_file, blob)
+        except DecryptionError:
+            return jsonify(
+                {
+                    "error": "decryption failed -- wrong vault password, or this "
+                    "file's stored ciphertext was corrupted or tampered with"
+                }
+            ), 422
+
+        if is_pdf(content_bytes):
+            mimetype = "application/pdf"
+        elif is_zip(content_bytes):
+            mimetype = "application/zip"
+        else:
+            mimetype = "text/plain; charset=utf-8"
+        response = Response(content_bytes, mimetype=mimetype)
+        response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
+
+    @app.delete("/api/documents/<doc_id>")
+    def api_delete_document(doc_id: str):
+        """Removes a document and every trace of it from the encrypted
+        search index.
+
+        Ordering here is deliberately the REVERSE of api_upload_document's
+        (rebuild the index first, delete the document second) -- not an
+        inconsistency, a chosen tradeoff. Deleting the document first and
+        rebuilding the index second would leave a window (permanent, if
+        the rebuild then failed) where sse_index still holds labels
+        pointing at a doc_id that no longer exists: api_search's
+        not-found fallback (`filename = doc_id` when fetch_document
+        returns None) would then surface that as a phantom search result
+        forever, with no way to clear it short of a manual re-upload of
+        some other document to trigger a fresh rebuild. Rebuilding first
+        instead means the worst-case failure is a document that still
+        exists but is temporarily unsearchable -- fully recoverable by
+        simply retrying this same request.
+        """
+        keys = _require_unlocked()
+        if keys is None:
+            return jsonify({"error": "vault is locked"}), 401
+
+        try:
+            existing = cloud_client.fetch_document(doc_id)
+        except CloudUnavailableError as exc:
+            return jsonify({"error": str(exc)}), 502
+        except CloudError as exc:
+            return jsonify({"error": str(exc)}), 502
+        if existing is None:
+            return jsonify({"error": "not found"}), 404
+
+        try:
+            _rebuild_and_push_index(keys, exclude_doc_id=doc_id)
+        except IndexRebuildError as exc:
+            return jsonify({
+                "error": (
+                    f"document was NOT deleted: the encrypted search index "
+                    f"could not be safely rebuilt without it, and was left "
+                    f"unchanged, so the document itself was left in place "
+                    f"too rather than deleting it out from under a stale "
+                    f"index: {exc}"
+                )
+            }), 500
+        except CloudUnavailableError as exc:
+            return jsonify({"error": str(exc)}), 502
+        except CloudError as exc:
+            return jsonify({"error": str(exc)}), 502
+
+        try:
+            cloud_client.delete_document(doc_id)
+        except CloudUnavailableError as exc:
+            return jsonify({
+                "error": (
+                    f"the encrypted index no longer references this "
+                    f"document, but deleting its stored ciphertext failed: "
+                    f"{exc}. It is no longer searchable; retry this "
+                    f"request to finish removing it."
+                )
+            }), 502
+        except CloudError as exc:
+            return jsonify({
+                "error": (
+                    f"the encrypted index no longer references this "
+                    f"document, but deleting its stored ciphertext failed: "
+                    f"{exc}. It is no longer searchable; retry this "
+                    f"request to finish removing it."
+                )
+            }), 502
+
+        return jsonify({"doc_id": doc_id, "status": "deleted"}), 200
+
+    # -- search --------------------------------------------------------------
+
+    @app.post("/api/search")
+    def api_search():
+        """Conjunctive (AND) search: a query normalises to one or more
+        keywords (client/search.py's normalise_conjunctive_query), and
+        a matching document must contain every one of them.
+
+        Each keyword is answered as its own completely independent,
+        unchanged Pi_bas search -- its own K1 token, its own cloud
+        round trip, its own decrypt -- and the N resulting doc_id sets
+        are intersected HERE, on the trusted client, after every one of
+        them has already been decrypted. The cloud is never asked to
+        compute, or told about, the intersection itself.
+
+        Queried in sorted order purely for determinism (AND has no
+        inherent order). A keyword whose own result set is already
+        empty stops the loop immediately -- the intersection can only
+        be empty from that point on -- which is a pure efficiency
+        choice, not an extra leak: the cloud already learns that
+        keyword's own (zero) result count from its own search
+        regardless of whether the remaining keywords are ever sent.
+        See client/search.py's module docstring for what this DOES add
+        to the leakage profile: the cloud learns that these N tokens
+        were submitted together as one logical request.
+        """
+        keys = _require_unlocked()
+        if keys is None:
+            return jsonify({"error": "vault is locked"}), 401
+
+        body = request.get_json(silent=True) or {}
+        query = body.get("query")
+        if not isinstance(query, str):
+            return jsonify({"error": "query must be a string"}), 400
+
+        try:
+            keywords = normalise_conjunctive_query(query)
+        except AmbiguousQueryError as exc:
+            return jsonify({"error": str(exc)}), 400
+
+        doc_ids = None
+        for keyword in sorted(keywords):
+            token = build_search_token(keys.k_index, keyword)
+            try:
+                encrypted_values = cloud_client.run_remote_search(token)
+            except CloudUnavailableError as exc:
+                return jsonify({"error": str(exc)}), 502
+
+            try:
+                keyword_doc_ids = decrypt_search_results(keys.k_index, keyword, encrypted_values)
+            except DecryptionError:
+                return jsonify(
+                    {"error": "one or more search results failed to decrypt -- possible tampering or corruption"}
+                ), 422
+
+            doc_ids = keyword_doc_ids if doc_ids is None else (doc_ids & keyword_doc_ids)
+            if not doc_ids:
+                break  # intersection with anything else is still empty
+
+        results = []
+        for doc_id in sorted(doc_ids or ()):
+            doc = cloud_client.fetch_document(doc_id)
+            filename = doc_id
+            if doc is not None:
+                filename = _decrypt_filename(keys, doc["enc_name"])
+            results.append({"doc_id": doc_id, "filename": filename})
+
+        return jsonify({"query": query, "keywords": sorted(keywords), "results": results}), 200
+
+    return app
+
+
+if __name__ == "__main__":
+    # Runs the trusted client on its own port, deliberately different
+    # from the cloud (Section 02's "why two processes matters for
+    # marks" -- start cloud/cloud_app.py separately, on its own port,
+    # to keep the process boundary genuine for the demo).
+    # CLIENT_PORT override: on macOS 12+, port 5000 is taken by the
+    # AirPlay Receiver, so run with e.g. CLIENT_PORT=5050 there.
+    import os
+    create_app().run(port=int(os.environ.get("CLIENT_PORT", "5000")), debug=False)

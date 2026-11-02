@@ -1,0 +1,857 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Encrypted Cloud Vault — SSE Architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=Spectral:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --paper:#F4F6FB; --surface:#FFFFFF; --surface-2:#EEF1F8; --inset:#F0F2F9;
+    --ink:#161A28; --ink-soft:#3A4056; --muted:#6B7288; --line:#DEE3EF;
+    --accent:#4B57E6; --accent-strong:#333CC9; --accent-wash:#EAECFC;
+    --trust:#0E9F8E; --trust-wash:#E4F5F1;
+    --untrust:#B47A20; --untrust-wash:#FaF1E1;
+    --risk:#C4353F; --risk-wash:#FBEBEC;
+    --shadow:0 1px 2px rgba(20,26,44,.05),0 8px 24px rgba(20,26,44,.06);
+    --radius:14px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --paper:#0D0F17; --surface:#151926; --surface-2:#1B2030; --inset:#12161F;
+      --ink:#E8EBF5; --ink-soft:#BAC1D6; --muted:#8A92A8; --line:#28303F;
+      --accent:#8E97FF; --accent-strong:#AAB2FF; --accent-wash:#1C2136;
+      --trust:#40D2C0; --trust-wash:#122A28;
+      --untrust:#E0A64B; --untrust-wash:#2A2415;
+      --risk:#F2717C; --risk-wash:#2C1A1E;
+      --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#0D0F17; --surface:#151926; --surface-2:#1B2030; --inset:#12161F;
+    --ink:#E8EBF5; --ink-soft:#BAC1D6; --muted:#8A92A8; --line:#28303F;
+    --accent:#8E97FF; --accent-strong:#AAB2FF; --accent-wash:#1C2136;
+    --trust:#40D2C0; --trust-wash:#122A28;
+    --untrust:#E0A64B; --untrust-wash:#2A2415;
+    --risk:#F2717C; --risk-wash:#2C1A1E;
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px rgba(0,0,0,.35);
+  }
+
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  @media (prefers-reduced-motion: reduce){html{scroll-behavior:auto}}
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:"Spectral",Georgia,"Times New Roman",serif;
+    font-size:17px; line-height:1.7; -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+  }
+  .wrap{max-width:1180px; margin:0 auto; padding:0 24px}
+
+  /* ---------- Masthead ---------- */
+  header.mast{
+    border-bottom:1px solid var(--line); background:
+      radial-gradient(1200px 380px at 78% -140px, var(--accent-wash), transparent 70%);
+  }
+  .mast-inner{padding:52px 0 40px; position:relative}
+  .eyebrow{
+    font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:12.5px;
+    letter-spacing:.16em; text-transform:uppercase; color:var(--accent-strong);
+    display:flex; gap:12px; align-items:center; flex-wrap:wrap;
+  }
+  .eyebrow .dot{width:5px;height:5px;border-radius:50%;background:var(--accent)}
+  h1{
+    font-family:"Archivo",system-ui,sans-serif; font-weight:800;
+    font-size:clamp(30px,5vw,52px); line-height:1.04; letter-spacing:-.02em;
+    margin:.5em 0 .3em; text-wrap:balance; max-width:16ch;
+  }
+  .lede{font-size:19px; color:var(--ink-soft); max-width:60ch; margin:0}
+  .meta-strip{
+    display:flex; gap:10px; flex-wrap:wrap; margin-top:26px;
+    font-family:"IBM Plex Mono",monospace; font-size:12.5px;
+  }
+  .chip{
+    border:1px solid var(--line); background:var(--surface);
+    border-radius:999px; padding:6px 13px; color:var(--ink-soft);
+    display:inline-flex; gap:7px; align-items:center;
+  }
+  .chip b{color:var(--ink); font-weight:600}
+
+  .theme-toggle{
+    position:absolute; top:20px; right:0; font-family:"IBM Plex Mono",monospace;
+    font-size:12px; letter-spacing:.05em; background:var(--surface);
+    border:1px solid var(--line); color:var(--ink-soft); border-radius:999px;
+    padding:7px 14px; cursor:pointer;
+  }
+  .theme-toggle:hover{border-color:var(--accent); color:var(--accent)}
+
+  /* ---------- Layout ---------- */
+  .grid{display:grid; grid-template-columns:236px minmax(0,1fr); gap:48px; padding:44px 0 80px}
+  nav.toc{position:sticky; top:20px; align-self:start; font-family:"Archivo",sans-serif}
+  nav.toc .toc-title{
+    font-family:"IBM Plex Mono",monospace; font-size:11px; letter-spacing:.16em;
+    text-transform:uppercase; color:var(--muted); margin:0 0 12px 12px;
+  }
+  nav.toc ol{list-style:none; margin:0; padding:0; counter-reset:toc}
+  nav.toc a{
+    display:block; text-decoration:none; color:var(--ink-soft);
+    font-size:13.5px; line-height:1.35; padding:7px 12px; border-radius:8px;
+    border-left:2px solid transparent;
+  }
+  nav.toc a::before{
+    counter-increment:toc; content:counter(toc,decimal-leading-zero);
+    font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--muted);
+    margin-right:9px;
+  }
+  nav.toc a:hover{background:var(--surface-2); color:var(--ink)}
+  nav.toc a.active{color:var(--accent); border-left-color:var(--accent); background:var(--accent-wash)}
+
+  main{min-width:0}
+  section{margin:0 0 56px; scroll-margin-top:24px}
+  .sec-num{
+    font-family:"IBM Plex Mono",monospace; font-size:12.5px; letter-spacing:.12em;
+    color:var(--accent-strong); text-transform:uppercase;
+  }
+  h2{
+    font-family:"Archivo",sans-serif; font-weight:700; font-size:clamp(23px,3vw,31px);
+    letter-spacing:-.015em; line-height:1.12; margin:.25em 0 .55em; text-wrap:balance;
+  }
+  h3{
+    font-family:"Archivo",sans-serif; font-weight:650; font-size:19px;
+    letter-spacing:-.01em; margin:1.9em 0 .5em; color:var(--ink);
+  }
+  h4{font-family:"Archivo",sans-serif;font-weight:600;font-size:15.5px;margin:1.4em 0 .3em}
+  p{max-width:70ch; margin:0 0 1.05em}
+  main a{color:var(--accent-strong); text-decoration:underline; text-underline-offset:2px}
+  strong{color:var(--ink); font-weight:600}
+  em.term{font-style:normal; font-weight:600; color:var(--accent-strong)}
+  code{
+    font-family:"IBM Plex Mono",monospace; font-size:.86em; background:var(--inset);
+    border:1px solid var(--line); border-radius:5px; padding:.08em .38em; color:var(--ink);
+  }
+
+  .intro-p{font-size:18.5px; color:var(--ink-soft); max-width:66ch}
+
+  /* ---------- Cards / callouts ---------- */
+  .card{
+    background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+    padding:22px 24px; box-shadow:var(--shadow); margin:1.4em 0;
+  }
+  .note{
+    border-left:3px solid var(--accent); background:var(--accent-wash);
+    border-radius:0 10px 10px 0; padding:15px 20px; margin:1.4em 0;
+  }
+  .note .label{
+    font-family:"IBM Plex Mono",monospace; font-size:11px; letter-spacing:.13em;
+    text-transform:uppercase; color:var(--accent-strong); display:block; margin-bottom:5px;
+  }
+  .note p{margin:0; max-width:64ch}
+  .risk{border-left-color:var(--risk); background:var(--risk-wash)}
+  .risk .label{color:var(--risk)}
+  .risk a{color:var(--risk)}
+  .decide{border-left-color:var(--trust); background:var(--trust-wash)}
+  .decide .label{color:var(--trust)}
+
+  /* ---------- Tables ---------- */
+  .twrap{overflow-x:auto; margin:1.4em 0; border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow)}
+  table{border-collapse:collapse; width:100%; font-family:"Archivo",sans-serif; font-size:14px; background:var(--surface)}
+  caption{caption-side:top; text-align:left; font-family:"IBM Plex Mono",monospace; font-size:11.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); padding:0 0 9px 2px}
+  th,td{text-align:left; padding:11px 15px; border-bottom:1px solid var(--line); vertical-align:top}
+  thead th{background:var(--surface-2); font-weight:600; color:var(--ink); font-size:12.5px; letter-spacing:.02em; position:sticky; top:0}
+  tbody tr:last-child td{border-bottom:none}
+  td code, th code{font-size:12.5px}
+  .mono-cell{font-family:"IBM Plex Mono",monospace; font-size:12.5px; white-space:nowrap}
+  .tag{display:inline-block; font-family:"IBM Plex Mono",monospace; font-size:11px; padding:2px 8px; border-radius:6px; border:1px solid var(--line)}
+  .t-trust{background:var(--trust-wash); color:var(--trust); border-color:transparent}
+  .t-untrust{background:var(--untrust-wash); color:var(--untrust); border-color:transparent}
+
+  /* ---------- Code blocks ---------- */
+  pre{
+    font-family:"IBM Plex Mono",monospace; font-size:13px; line-height:1.6;
+    background:var(--inset); border:1px solid var(--line); border-radius:12px;
+    padding:18px 20px; overflow-x:auto; margin:1.3em 0; color:var(--ink-soft);
+  }
+  pre .k{color:var(--accent-strong); font-weight:500}
+  pre .c{color:var(--muted); font-style:italic}
+  pre .s{color:var(--trust)}
+  pre b{color:var(--ink); font-weight:600}
+
+  /* ---------- Figures ---------- */
+  figure{margin:1.8em 0; background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:24px 22px 14px; box-shadow:var(--shadow)}
+  figure svg{display:block; width:100%; height:auto; color:var(--ink)}
+  figcaption{font-size:14px; color:var(--muted); margin-top:14px; max-width:72ch; font-family:"Archivo",sans-serif}
+  figcaption b{color:var(--ink-soft)}
+
+  .steps{list-style:none;counter-reset:st;padding:0;margin:1.3em 0}
+  .steps>li{position:relative;padding:2px 0 18px 46px;margin:0}
+  .steps>li::before{
+    counter-increment:st;content:counter(st);position:absolute;left:0;top:-2px;
+    width:30px;height:30px;border-radius:9px;background:var(--accent-wash);
+    color:var(--accent-strong);font-family:"IBM Plex Mono",monospace;font-weight:600;
+    font-size:14px;display:grid;place-items:center;border:1px solid var(--line);
+  }
+  .steps>li:not(:last-child)::after{content:"";position:absolute;left:14px;top:30px;bottom:2px;width:1.5px;background:var(--line)}
+  .steps h4{margin:.1em 0 .25em}
+  .steps p{margin:0;font-size:15.5px;max-width:64ch}
+
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:2px 18px;font-size:15px;margin:1.1em 0}
+  .kv dt{font-family:"IBM Plex Mono",monospace;font-size:12.5px;color:var(--accent-strong);padding-top:3px}
+  .kv dd{margin:0 0 10px}
+
+  .phase{border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);box-shadow:var(--shadow);margin:1.1em 0;overflow:hidden}
+  .phase summary{cursor:pointer;list-style:none;padding:16px 20px;display:flex;gap:14px;align-items:baseline;font-family:"Archivo",sans-serif}
+  .phase summary::-webkit-details-marker{display:none}
+  .phase .pnum{font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--accent-strong);border:1px solid var(--line);border-radius:6px;padding:3px 9px;background:var(--accent-wash)}
+  .phase .ptitle{font-weight:650;font-size:16.5px}
+  .phase .pgoal{color:var(--muted);font-size:13.5px;margin-left:auto;font-family:"IBM Plex Mono",monospace}
+  .phase[open] summary{border-bottom:1px solid var(--line)}
+  .phase .pbody{padding:6px 20px 18px}
+  .phase .pbody p{font-size:15px}
+  .done{font-family:"IBM Plex Mono",monospace;font-size:12.5px;color:var(--trust);background:var(--trust-wash);border-radius:8px;padding:9px 13px;margin-top:10px;display:block}
+
+  hr.rule{border:none;border-top:1px solid var(--line);margin:0}
+  footer{border-top:1px solid var(--line);padding:34px 0 60px;color:var(--muted);font-size:14px;font-family:"Archivo",sans-serif}
+  footer .wrap{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap}
+
+  @media (max-width:980px){
+    .grid{grid-template-columns:1fr;gap:0;padding-top:26px}
+    nav.toc{position:static;margin-bottom:30px;border:1px solid var(--line);border-radius:var(--radius);padding:16px 10px;background:var(--surface)}
+    nav.toc ol{columns:2;column-gap:8px}
+  }
+  @media (max-width:560px){
+    body{font-size:16px}
+    .wrap{padding:0 16px}
+    nav.toc ol{columns:1}
+    .theme-toggle{position:static;margin-bottom:18px}
+    .mast-inner{padding-top:26px}
+  }
+  .steps ul.unlock-cases{margin:.5em 0 .7em;padding-left:1.1em;font-size:15.5px;max-width:64ch;color:var(--ink-soft)}
+  .steps ul.unlock-cases li{margin:0 0 .45em;padding:0}
+  .steps ul.unlock-cases li:last-child{margin-bottom:0}
+  .steps ul.unlock-cases strong{color:var(--ink)}
+  .steps li > p + p{margin-top:.55em}
+</style>
+</head>
+<body>
+
+<header class="mast">
+  <div class="wrap mast-inner">
+    <button class="theme-toggle" id="tt" aria-label="Toggle colour theme">◐ theme</button>
+    <div class="eyebrow"><span class="dot"></span> Stage 1 · Architecture &amp; Security Design <span class="dot"></span> Cryptography Course Project</div>
+    <h1>Encrypted Cloud Vault with Searchable Symmetric Encryption</h1>
+    <p class="lede">A complete, defensible design for storing files on an untrusted cloud while still searching them by keyword — where the server never sees a single byte of plaintext, a filename, or a keyword.</p>
+    <div class="meta-strip">
+      <span class="chip">Scheme <b>Π<sub>bas</sub> single-keyword SSE</b></span>
+      <span class="chip">Stack <b>Python + Flask</b></span>
+      <span class="chip">Adversary <b>honest-but-curious cloud</b></span>
+      <span class="chip">Status <b>implemented — Phases 1–6 complete, 230/230 tests</b></span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap grid">
+  <nav class="toc" aria-label="Contents">
+    <p class="toc-title">Contents</p>
+    <ol>
+      <li><a href="#scope">Requirements &amp; scope</a></li>
+      <li><a href="#roles">Client vs. simulated cloud</a></li>
+      <li><a href="#architecture">System architecture</a></li>
+      <li><a href="#keys">Key management</a></li>
+      <li><a href="#index">Searchable index design</a></li>
+      <li><a href="#tokens">Search-token generation</a></li>
+      <li><a href="#workflow">End-to-end crypto workflow</a></li>
+      <li><a href="#db">Database structure</a></li>
+      <li><a href="#threat">Security model &amp; leakage</a></li>
+      <li><a href="#problems">Problems to fix before coding</a></li>
+      <li><a href="#folders">Project folder structure</a></li>
+      <li><a href="#ui">UI modules</a></li>
+      <li><a href="#testing">Testing strategy</a></li>
+      <li><a href="#metrics">Performance metrics</a></li>
+      <li><a href="#plan">Phased implementation plan</a></li>
+      <li><a href="#viva">Viva defence cheat-sheet</a></li>
+    </ol>
+  </nav>
+
+  <main>
+    <p class="intro-p">This document is the blueprint you build from and defend in your viva. It fixes one clean cryptographic scheme, states exactly who is trusted and who is not, and is honest about what the design leaks — because a project that <em class="term">knows its own weaknesses</em> scores higher than one that pretends to have none. Read it once end-to-end before writing any code.</p>
+
+    <!-- 1 -->
+    <section id="scope">
+      <div class="sec-num">Section 01</div>
+      <h2>Requirements &amp; scope</h2>
+      <p>The problem SSE solves is a real tension. Encrypting files before uploading them to a cloud protects your data if the provider is breached or curious — but ordinary encryption also destroys your ability to search, because the server sees only random-looking bytes. <strong>Searchable Symmetric Encryption</strong> restores search over encrypted data: the client builds a special encrypted index, and the server can answer "which encrypted files contain keyword <code>w</code>?" without ever learning <code>w</code> or the file contents.</p>
+      <p>For a 30-mark project the winning move is <strong>depth over breadth</strong>: implement one well-understood scheme correctly, measure it, and analyse its leakage precisely. We therefore scope the project tightly and defend that scope deliberately.</p>
+
+      <div class="twrap">
+        <table>
+          <caption>Scope — in and out</caption>
+          <thead><tr><th style="width:34%">Capability</th><th style="width:14%">Status</th><th>Rationale</th></tr></thead>
+          <tbody>
+            <tr><td>Client-side file encryption (AES-256-GCM)</td><td><span class="tag t-trust">In</span></td><td>Confidentiality + integrity of stored files.</td></tr>
+            <tr><td>Single exact-keyword search over encrypted index</td><td><span class="tag t-trust">In</span></td><td>The core contribution; well-understood, correct, defensible.</td></tr>
+            <tr><td>Encrypted filenames &amp; encrypted document IDs</td><td><span class="tag t-trust">In</span></td><td>Closes obvious metadata leaks the naïve design misses.</td></tr>
+            <tr><td>Honest leakage analysis + live "what the cloud sees" demo</td><td><span class="tag t-trust">In</span></td><td>Where most of the marks and viva credibility live.</td></tr>
+            <tr><td>Multi-keyword / boolean / ranked search</td><td><span class="tag t-untrust">Out</span></td><td>Adds real complexity to tokens and leakage; risks overreach. Named as future work.</td></tr>
+            <tr><td>Dynamic updates with <em>forward privacy</em></td><td><span class="tag t-untrust">Out</span></td><td>Static index only. We add files by rebuilding; we do not claim forward privacy.</td></tr>
+            <tr><td>Defence against a <em>malicious</em> (tampering) server; ORAM</td><td><span class="tag t-untrust">Out</span></td><td>Out of the honest-but-curious model. Named as future work, not implemented.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note decide"><span class="label">Design decision</span><p>We deliberately keep the scheme <strong>static and single-keyword</strong>. This is not a shortcut — it is the standard teaching construction (Cash et al.'s Π<sub>bas</sub>), it has a precise, citable leakage profile, and you can implement and explain every line of it. An examiner rewards a correct simple scheme far more than a half-working complex one.</p></div>
+    </section>
+
+    <!-- 2 -->
+    <section id="roles">
+      <div class="sec-num">Section 02</div>
+      <h2>Client vs. simulated cloud — who is trusted</h2>
+      <p>The single most important idea to get right — and the first thing you will be asked in the viva — is the <strong>trust boundary</strong>. Everything that touches a key or a plaintext lives on the <em class="term">trusted client</em>. The <em class="term">simulated cloud</em> is treated as an adversary that stores your data and honestly runs the protocol, but reads everything it can. Only ciphertext and opaque tokens ever cross the boundary.</p>
+      <p>To keep all cryptography in Python (your chosen stack) while still modelling a genuine client↔server split, we run <strong>two separate Flask processes</strong>. The browser UI is a thin shell over the trusted client; the cloud is a different process on a different port that only ever receives ciphertext.</p>
+
+      <div class="twrap">
+        <table>
+          <caption>Responsibility split</caption>
+          <thead><tr><th style="width:32%">Trusted client <span class="tag t-trust">holds keys</span></th><th style="width:32%">Simulated cloud <span class="tag t-untrust">zero keys</span></th></tr></thead>
+          <tbody>
+            <tr><td>Derives all keys from the password (KDF).</td><td>Stores encrypted file blobs.</td></tr>
+            <tr><td>Extracts &amp; normalises keywords from files.</td><td>Stores the encrypted inverted index (label → value dictionary).</td></tr>
+            <tr><td>Encrypts files with AES-256-GCM.</td><td>Runs the search loop over <em>labels</em> it cannot interpret.</td></tr>
+            <tr><td>Builds the encrypted index; generates search tokens.</td><td>Returns matching encrypted IDs / blobs.</td></tr>
+            <tr><td>Decrypts search results and downloaded files.</td><td>Never decrypts, never sees a keyword, filename, or plaintext.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note"><span class="label">Why two processes matters for marks</span><p>It lets you literally open the cloud's database in the demo and show it contains nothing but random bytes and opaque labels. A design where "client" and "server" are just two functions in one script cannot make that argument convincingly.</p></div>
+    </section>
+
+    <!-- 3 -->
+    <section id="architecture">
+      <div class="sec-num">Section 03</div>
+      <h2>System architecture</h2>
+      <p>Three tiers, one boundary. The browser renders the UI and never does cryptography itself; it calls the local trusted-client service. That service performs every cryptographic operation and speaks to the untrusted cloud service purely in ciphertext and tokens.</p>
+
+      <figure>
+        <svg viewBox="0 0 860 372" role="img" aria-label="Architecture showing a browser UI and trusted client on the left in a trusted zone, a dashed trust boundary in the middle across which only ciphertext and tokens travel, and an untrusted cloud with an encrypted document store and encrypted index on the right.">
+          <defs>
+            <marker id="ah" markerWidth="9" markerHeight="9" refX="7.5" refY="4.5" orient="auto"><polygon points="0,0 9,4.5 0,9" fill="currentColor"/></marker>
+            <marker id="ahA" markerWidth="9" markerHeight="9" refX="7.5" refY="4.5" orient="auto"><polygon points="0,0 9,4.5 0,9" fill="#4B57E6"/></marker>
+          </defs>
+          <!-- trusted zone -->
+          <rect x="14" y="40" width="356" height="300" rx="16" fill="var(--trust-wash)" stroke="var(--trust)" stroke-width="1.5"/>
+          <text x="30" y="66" font-family="IBM Plex Mono,monospace" font-size="12" fill="var(--trust)" letter-spacing="1.5">TRUSTED ZONE · holds keys &amp; plaintext</text>
+          <!-- untrusted zone -->
+          <rect x="490" y="40" width="356" height="300" rx="16" fill="var(--untrust-wash)" stroke="var(--untrust)" stroke-width="1.5"/>
+          <text x="506" y="66" font-family="IBM Plex Mono,monospace" font-size="12" fill="var(--untrust)" letter-spacing="1.5">UNTRUSTED CLOUD · zero keys</text>
+
+          <!-- boundary -->
+          <line x1="430" y1="34" x2="430" y2="346" stroke="var(--muted)" stroke-width="1.4" stroke-dasharray="5 5"/>
+          <text x="430" y="24" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="11" fill="var(--muted)">trust boundary</text>
+
+          <!-- browser -->
+          <rect x="40" y="92" width="140" height="86" rx="11" fill="var(--surface)" stroke="var(--line)"/>
+          <text x="110" y="128" text-anchor="middle" font-family="Archivo,sans-serif" font-size="14" font-weight="700" fill="var(--ink)">Browser UI</text>
+          <text x="110" y="148" text-anchor="middle" font-family="Archivo,sans-serif" font-size="11.5" fill="var(--muted)">thin shell, no crypto</text>
+          <!-- client -->
+          <rect x="204" y="92" width="148" height="200" rx="11" fill="var(--surface)" stroke="var(--trust)" stroke-width="1.5"/>
+          <text x="278" y="122" text-anchor="middle" font-family="Archivo,sans-serif" font-size="14" font-weight="700" fill="var(--ink)">Trusted Client</text>
+          <text x="278" y="144" text-anchor="middle" font-family="Archivo,sans-serif" font-size="11.5" fill="var(--ink-soft)">KDF · keys</text>
+          <text x="278" y="164" text-anchor="middle" font-family="Archivo,sans-serif" font-size="11.5" fill="var(--ink-soft)">AES-GCM encrypt/decrypt</text>
+          <text x="278" y="184" text-anchor="middle" font-family="Archivo,sans-serif" font-size="11.5" fill="var(--ink-soft)">keyword extraction</text>
+          <text x="278" y="204" text-anchor="middle" font-family="Archivo,sans-serif" font-size="11.5" fill="var(--ink-soft)">index build</text>
+          <text x="278" y="224" text-anchor="middle" font-family="Archivo,sans-serif" font-size="11.5" fill="var(--ink-soft)">token generation</text>
+          <text x="278" y="244" text-anchor="middle" font-family="Archivo,sans-serif" font-size="11.5" fill="var(--ink-soft)">result decrypt</text>
+
+          <line x1="180" y1="135" x2="202" y2="135" stroke="var(--muted)" stroke-width="1.6" marker-end="url(#ah)"/>
+          <line x1="202" y1="150" x2="180" y2="150" stroke="var(--muted)" stroke-width="1.6" marker-end="url(#ah)"/>
+
+          <!-- cloud stores -->
+          <rect x="516" y="96" width="300" height="92" rx="11" fill="var(--surface)" stroke="var(--untrust)" stroke-width="1.3"/>
+          <text x="666" y="124" text-anchor="middle" font-family="Archivo,sans-serif" font-size="13.5" font-weight="700" fill="var(--ink)">Encrypted document store</text>
+          <text x="666" y="146" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="11" fill="var(--muted)">doc_id → nonce ‖ ciphertext ‖ tag</text>
+          <text x="666" y="166" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="11" fill="var(--muted)">+ encrypted filename</text>
+
+          <rect x="516" y="204" width="300" height="92" rx="11" fill="var(--surface)" stroke="var(--untrust)" stroke-width="1.3"/>
+          <text x="666" y="232" text-anchor="middle" font-family="Archivo,sans-serif" font-size="13.5" font-weight="700" fill="var(--ink)">Encrypted index (dict D)</text>
+          <text x="666" y="254" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="11" fill="var(--muted)">label → Enc(id)</text>
+          <text x="666" y="274" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="11" fill="var(--muted)">opaque, unlinkable to words</text>
+
+          <!-- crossing arrows -->
+          <line x1="352" y1="150" x2="514" y2="140" stroke="#4B57E6" stroke-width="2" marker-end="url(#ahA)"/>
+          <text x="432" y="132" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="10.5" fill="#4B57E6">upload: ciphertext + index</text>
+          <line x1="352" y1="235" x2="514" y2="250" stroke="#4B57E6" stroke-width="2" marker-end="url(#ahA)"/>
+          <text x="432" y="270" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="10.5" fill="#4B57E6">search: token →  ← enc results</text>
+        </svg>
+        <figcaption><b>Trust boundary.</b> The blue arrows are the only data that ever crosses the network. Nothing readable — no keyword, filename, or file byte — leaves the trusted client. Delete the two cloud stores and the client still holds every key; that is the property being demonstrated.</figcaption>
+      </figure>
+    </section>
+
+    <!-- 4 -->
+    <section id="keys">
+      <div class="sec-num">Section 04</div>
+      <h2>Key management</h2>
+      <p>All keys descend from one thing the user knows: a password. We never store a key — we store only a random <code>salt</code> and the KDF parameters, and re-derive every key at unlock time. Keys live in the trusted client's memory for the session and are wiped on lock.</p>
+
+      <figure>
+        <svg viewBox="0 0 760 356" role="img" aria-label="Key derivation tree: password plus salt feed Argon2id to produce a master key; HKDF splits the master key into a file-encryption key and an index PRF key; the index key derives per-keyword keys K1 and K2.">
+          <defs><marker id="ah2" markerWidth="9" markerHeight="9" refX="7.5" refY="4.5" orient="auto"><polygon points="0,0 9,4.5 0,9" fill="var(--muted)"/></marker></defs>
+          <!-- password + salt -->
+          <rect x="60" y="24" width="180" height="52" rx="10" fill="var(--surface)" stroke="var(--line)"/>
+          <text x="150" y="46" text-anchor="middle" font-family="Archivo,sans-serif" font-size="13.5" font-weight="700" fill="var(--ink)">password</text>
+          <text x="150" y="64" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="11" fill="var(--muted)">user-supplied secret</text>
+          <rect x="300" y="24" width="180" height="52" rx="10" fill="var(--surface)" stroke="var(--line)"/>
+          <text x="390" y="46" text-anchor="middle" font-family="Archivo,sans-serif" font-size="13.5" font-weight="700" fill="var(--ink)">salt (random, stored)</text>
+          <text x="390" y="64" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="11" fill="var(--muted)">16 bytes · not secret</text>
+
+          <line x1="150" y1="76" x2="255" y2="104" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#ah2)"/>
+          <line x1="390" y1="76" x2="285" y2="104" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#ah2)"/>
+
+          <!-- KDF -->
+          <rect x="185" y="106" width="170" height="50" rx="10" fill="var(--accent-wash)" stroke="var(--accent)" stroke-width="1.4"/>
+          <text x="270" y="130" text-anchor="middle" font-family="Archivo,sans-serif" font-size="13.5" font-weight="700" fill="var(--accent-strong)">Argon2id</text>
+          <text x="270" y="147" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="10.5" fill="var(--accent-strong)">slow · memory-hard KDF</text>
+
+          <line x1="270" y1="156" x2="270" y2="184" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#ah2)"/>
+          <!-- master -->
+          <rect x="175" y="186" width="190" height="50" rx="10" fill="var(--surface)" stroke="var(--ink-soft)" stroke-width="1.4"/>
+          <text x="270" y="210" text-anchor="middle" font-family="Archivo,sans-serif" font-size="13.5" font-weight="700" fill="var(--ink)">Master Key (256-bit)</text>
+          <text x="270" y="227" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="10.5" fill="var(--muted)">memory only · never stored</text>
+
+          <!-- HKDF split -->
+          <line x1="240" y1="236" x2="160" y2="286" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#ah2)"/>
+          <line x1="300" y1="236" x2="470" y2="286" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#ah2)"/>
+          <text x="270" y="262" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="10.5" fill="var(--muted)">HKDF-SHA256 · domain-separated</text>
+
+          <rect x="40" y="288" width="230" height="56" rx="10" fill="var(--trust-wash)" stroke="var(--trust)" stroke-width="1.3"/>
+          <text x="155" y="311" text-anchor="middle" font-family="Archivo,sans-serif" font-size="13" font-weight="700" fill="var(--ink)">K_file</text>
+          <text x="155" y="330" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="10.5" fill="var(--muted)">AES-256-GCM · files + names</text>
+
+          <rect x="360" y="288" width="360" height="56" rx="10" fill="var(--accent-wash)" stroke="var(--accent)" stroke-width="1.3"/>
+          <text x="540" y="308" text-anchor="middle" font-family="Archivo,sans-serif" font-size="13" font-weight="700" fill="var(--ink)">K_index  (PRF key for F = HMAC-SHA256)</text>
+          <text x="540" y="330" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="10.5" fill="var(--accent-strong)">per keyword →  K1=F(K_index,1‖w)   K2=F(K_index,2‖w)</text>
+        </svg>
+        <figcaption><b>One password, a tree of keys.</b> Argon2id makes each password guess expensive (defeating offline brute force); HKDF gives cryptographically independent sub-keys so a weakness in one use never touches another. The per-keyword keys <code>K1</code>, <code>K2</code> are computed on demand and are the heart of the search scheme.</figcaption>
+      </figure>
+
+      <dl class="kv">
+        <dt>K_file</dt><dd>AES-256-GCM key that encrypts file contents <em>and</em> filenames. A fresh random 96-bit nonce per encryption.</dd>
+        <dt>K_index</dt><dd>The PRF master key. It is <strong>never sent</strong>; as implemented, only <code>K1</code> — the narrower of the two per-keyword keys, and only for keywords actually searched — ever crosses to the cloud. <code>K2</code> never leaves the client at all (see Section 06).</dd>
+        <dt>K1 = F(K_index, 1‖w)</dt><dd>Per-keyword <em>label</em> key — generates the dictionary labels for keyword <code>w</code>. This is the only per-keyword key sent to the cloud, as a search token.</dd>
+        <dt>K2 = F(K_index, 2‖w)</dt><dd>Per-keyword <em>value</em> key — encrypts the document IDs stored under those labels. Derived and used entirely client-side, both at index build and at result decryption; never transmitted.</dd>
+        <dt>kdf_verifier</dt><dd>Not a key — a fixed plaintext constant (<code>b"vault-verifier:v1"</code>) encrypted under <code>K_index</code> with AES-GCM, stored alongside <code>salt</code> in the cloud's <code>meta</code> table. Minted once, on a vault's first-ever unlock — and only when both KDF rows are absent <em>and</em> the cloud's <code>documents</code> table is empty (Section 07·A); every later unlock must decrypt it successfully before <code>K_index</code> is trusted for anything else (Section 07·A, Section 09).</dd>
+      </dl>
+      <div class="note risk"><span class="label">Trap to avoid</span><p>Never store the master key or any sub-key to disk "to save re-deriving it". The whole security argument is that the client holds nothing at rest except a non-secret salt. If a key is written down, a stolen laptop breaks everything Argon2id was protecting.</p></div>
+    </section>
+
+    <!-- 5 -->
+    <section id="index">
+      <div class="sec-num">Section 05</div>
+      <h2>Searchable index design</h2>
+      <p>The index is an <strong>encrypted inverted index</strong>: conceptually "keyword → list of documents containing it", but stored so the server can look entries up without knowing any keyword. We use the Π<sub>bas</sub> construction (Cash, Jaeger, Jarecki, Jutla, Krawczyk, Roşu, Steiner, 2014) — the canonical, provably-secure, easy-to-implement static SSE scheme.</p>
+      <p>The whole index is one flat dictionary <code>D</code> of <code>label → value</code> pairs. There is no visible grouping by keyword: entries for different keywords are indistinguishable random-looking bytes sitting in the same table.</p>
+
+      <h3>How the index is built (client side)</h3>
+      <pre><span class="c"># For every keyword w and its matching documents id[0..c-1]:</span>
+K1 = <b>F</b>(K_index, <span class="s">1</span> ‖ w)        <span class="c"># label key  (F = HMAC-SHA256)</span>
+K2 = <b>F</b>(K_index, <span class="s">2</span> ‖ w)        <span class="c"># value key</span>
+<span class="k">for</span> counter, id <span class="k">in</span> enumerate(matching_docs):
+    label = <b>F</b>(K1, counter)         <span class="c"># 0,1,2,... deterministic per keyword</span>
+    value = <b>AES_GCM_Enc</b>(K2, id)     <span class="c"># encrypted document identifier</span>
+    D[label] = value                <span class="c"># insert into the flat dictionary</span></pre>
+
+      <figure>
+        <svg viewBox="0 0 720 300" role="img" aria-label="Keyword to postings example: keyword report maps to documents id2 and id7; each pair becomes a label from F(K1,counter) and a value that is the encrypted id, all inserted into one flat dictionary D alongside unrelated entries.">
+          <rect x="20" y="30" width="150" height="120" rx="10" fill="var(--surface)" stroke="var(--line)"/>
+          <text x="95" y="24" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="11" fill="var(--muted)">plaintext (client only)</text>
+          <text x="40" y="60" font-family="Archivo,sans-serif" font-size="13.5" font-weight="700" fill="var(--ink)">"report"</text>
+          <text x="40" y="88" font-family="IBM Plex Mono,monospace" font-size="12" fill="var(--ink-soft)">→ id2</text>
+          <text x="40" y="112" font-family="IBM Plex Mono,monospace" font-size="12" fill="var(--ink-soft)">→ id7</text>
+          <text x="40" y="136" font-family="IBM Plex Mono,monospace" font-size="11" fill="var(--muted)">counter 0,1</text>
+
+          <line x1="176" y1="90" x2="250" y2="90" stroke="var(--accent)" stroke-width="1.8" marker-end="url(#ah)"/>
+          <text x="213" y="80" text-anchor="middle" font-family="IBM Plex Mono,monospace" font-size="10" fill="var(--accent-strong)">encrypt</text>
+
+          <rect x="256" y="20" width="444" height="260" rx="10" fill="var(--untrust-wash)" stroke="var(--untrust)" stroke-width="1.3"/>
+          <text x="276" y="46" font-family="IBM Plex Mono,monospace" font-size="12" fill="var(--untrust)">dictionary D  (this is all the cloud stores)</text>
+          <line x1="276" y1="56" x2="680" y2="56" stroke="var(--untrust)" stroke-opacity="0.4"/>
+          <g font-family="IBM Plex Mono,monospace" font-size="12" fill="var(--ink-soft)">
+            <text x="276" y="82">a91f4c… </text><text x="470" y="82" fill="var(--muted)">→  8e2b…04</text>
+            <text x="276" y="110" fill="var(--accent-strong)">F(K1,0)=7d3e1a… </text><text x="470" y="110" fill="var(--accent-strong)">→  Enc(K2,id2)</text>
+            <text x="276" y="138">c02d77… </text><text x="470" y="138" fill="var(--muted)">→  11af…9c</text>
+            <text x="276" y="166" fill="var(--accent-strong)">F(K1,1)=b8890f… </text><text x="470" y="166" fill="var(--accent-strong)">→  Enc(K2,id7)</text>
+            <text x="276" y="194">5f1c0a… </text><text x="470" y="194" fill="var(--muted)">→  6b7e…d2</text>
+            <text x="276" y="222">e4470b… </text><text x="470" y="222" fill="var(--muted)">→  02c9…7f</text>
+          </g>
+          <text x="276" y="258" font-family="Archivo,sans-serif" font-size="12" fill="var(--muted)">Blue rows belong to "report" — but nothing in the table says so.</text>
+        </svg>
+        <figcaption><b>One flat table, no visible structure.</b> The two entries for "report" (blue) are scattered among entries for every other keyword and are byte-indistinguishable from them. The server can find them only if it is given <code>K1</code> for "report" — which happens only when the user searches that exact word.</figcaption>
+      </figure>
+      <div class="note"><span class="label">Consistency rule</span><p>Keyword extraction must be <strong>identical</strong> at index time and search time or searches silently miss. Fix one tokenizer: lowercase, strip punctuation, drop a fixed stop-word list, optional light stemming, deduplicate per document. Write it once in <code>tokenizer.py</code> and call it from both paths.</p></div>
+    </section>
+
+    <!-- 6 -->
+    <section id="tokens">
+      <div class="sec-num">Section 06</div>
+      <h2>Search-token generation</h2>
+      <p>A <strong>search token</strong> is the minimum secret material the server needs to find one keyword's entries — and nothing more. For keyword <code>w</code> the client computes both per-keyword keys, but — as implemented — sends only <code>K1</code>:</p>
+      <pre><span class="c"># client, at search time</span>
+w   = tokenize(query)                 <span class="c"># same normaliser as indexing</span>
+K1  = <b>F</b>(K_index, <span class="s">1</span> ‖ w)
+K2  = <b>F</b>(K_index, <span class="s">2</span> ‖ w)             <span class="c"># derived, but kept client-side</span>
+token = K1                            <span class="c"># only K1 crosses to the cloud</span></pre>
+      <p>Because <code>F</code> is deterministic, the token for a given word is always the same. That is what makes search work — and, honestly, it is also the scheme's main leak (the server can tell when you search the same word twice). We name that in the leakage section rather than hiding it.</p>
+      <p>The server uses the token to regenerate labels one by one and stops at the first miss:</p>
+      <pre><span class="c"># cloud, honest-but-curious — no keys, only the token</span>
+results = []
+counter = 0
+<span class="k">while</span> True:
+    label = <b>F</b>(K1, counter)
+    <span class="k">if</span> label <span class="k">in</span> D:
+        results.append(D[label])      <span class="c"># still an encrypted id</span>
+        counter += 1
+    <span class="k">else</span>:
+        <span class="k">break</span>                         <span class="c"># contiguous counters → clean stop</span>
+<span class="k">return</span> results                       <span class="c"># client decrypts each with K2, derived locally</span></pre>
+      <div class="note decide"><span class="label">Deviation from the original design — K2 never leaves the client</span><p>The design above assumed a token of <code>(K1, K2)</code>. <code>client/search.py</code> implements a deliberately tighter version: only <code>K1</code> is ever sent. The cloud's search loop only ever regenerates labels with <code>K1</code> — it never decrypts a value, so it never needed <code>K2</code> in the first place. <code>K2</code> is derived fresh, client-side, at the moment a result needs decrypting, from the same <code>(K_index, keyword)</code> pair that produced <code>K1</code> a line earlier — there is nothing for it to do on the wire. Sending it anyway would have widened, for zero functional benefit, this project's standing "zero keys ever cross to the cloud" invariant. This is flagged rather than silently changed: reverting to literal <code>(K1, K2)</code> is a one-line change in <code>build_search_token()</code> if strict fidelity to the original pseudocode is ever preferred. It does not change the leakage profile in Section 09 — the server still recognises repeat searches for the same word from <code>K1</code> alone.</p></div>
+    </section>
+
+    <!-- 7 -->
+    <section id="workflow">
+      <div class="sec-num">Section 07</div>
+      <h2>End-to-end cryptographic workflow</h2>
+      <p>Four flows cover the whole system. Follow them in order when you demo.</p>
+
+      <h3>A · Unlock (key setup)</h3>
+      <ol class="steps">
+        <li><h4>Enter password</h4><p>Client fetches the stored <code>salt</code> and <code>kdf_verifier</code> from the cloud (neither is secret). Exactly one branch is allowed to mint both from scratch, and it is guarded by <em>two</em> conditions rather than one: both rows must be absent <em>and</em> the cloud must currently hold no documents. Absence of both rows is not by itself evidence of a fresh vault — an untrusted cloud, an operator <code>DELETE</code>, or a partially restored backup can produce exactly that state on a vault full of data.</p></li>
+        <li><h4>Derive keys</h4><p>Argon2id(password, salt) → Master Key; HKDF splits it into <code>K_file</code> and <code>K_index</code>, held in memory only.</p></li>
+        <li><h4>Verify, fail closed <span class="tag t-untrust">H1/H2 · F1 fix</span></h4><p>Unlock resolves to exactly one of four outcomes, and only the first two produce keys:</p>
+        <ul class="unlock-cases">
+          <li><strong>Both rows present, verifier decrypts → unlocked (200).</strong> <code>AES-GCM-Dec(K_index, kdf_verifier)</code> succeeds, so the derived <code>K_index</code> is the one this vault was created with.</li>
+          <li><strong>Both rows absent <em>and</em> no documents stored → bootstrap (200).</strong> A genuinely fresh vault: mint a random <code>salt</code>, derive the keys, encrypt the verifier constant under <code>K_index</code>, and write both rows. This is the only branch in the whole application that creates a vault identity.</li>
+          <li><strong>Verifier fails to decrypt → refused (401).</strong> The wrong password, or a substituted/corrupted <code>salt</code> or verifier — caught here, <em>before</em> the derived keys ever reach an upload or index rebuild.</li>
+          <li><strong>KDF metadata incomplete → refused (409).</strong> Two distinct cases, same fail-closed answer. <em>Exactly one</em> of <code>salt</code>/<code>kdf_verifier</code> present: a deleted row, a partial write, tampering — never a fresh vault. <em>Both</em> absent while the <code>documents</code> table is non-empty: the vault plainly existed, so its KDF rows were lost or deleted. In neither case does the client guess, bootstrap, or mint a new identity over the old one, and in neither case is a single stored byte rewritten — the encrypted documents and the existing index are left exactly as they were. The vault stays locked for <em>every</em> password, correct ones included, until its KDF metadata is restored.</li>
+        </ul>
+        <p>The last case is fix <strong>F1</strong>, closing the residual half of H2: the original H2 fix rejected one missing row but still treated <em>both</em> missing as a fresh vault, so deleting one extra row let any password "unlock" a populated vault. Regression-tested in <code>tests/test_client_app.py::TestF1BothKdfRowsMissingRegression</code> — wrong-password refusal, encrypted documents proven byte-identical after the attempt, and the genuinely-empty-vault bootstrap still working.</p></li>
+      </ol>
+
+      <h3>B · Upload &amp; index a file</h3>
+      <ol class="steps">
+        <li><h4>Encrypt the file</h4><p>Random 96-bit nonce; <code>ct = AES-GCM(K_file, nonce, file)</code>. Encrypt the filename the same way. Assign a random <code>doc_id</code>. Push the blob and encrypted name to the cloud — the document is safely stored at this point regardless of what happens next.</p></li>
+        <li><h4>Rebuild the whole index <span class="tag t-untrust">atomic replace</span></h4><p>Implemented as a full, static rebuild rather than an incremental patch: the client re-fetches and re-decrypts <em>every</em> document currently in the vault, re-tokenizes each with the shared tokenizer, and rebuilds dictionary <code>D</code> from scratch — <code>label = F(K1,counter)</code>, <code>value = Enc(K2, doc_id)</code> for every keyword of every document. An incremental per-file patch was rejected: since <code>counter</code> is assigned in <code>doc_id</code>-sorted order, adding one file can shift the counter (and thus the label) an <em>existing</em> document gets for a shared keyword, which an additive push would leave as orphaned stale rows.</p></li>
+        <li><h4>All-or-nothing push <span class="tag t-untrust">H1 fix</span></h4><p>If any document in the corpus fails to decrypt during the rebuild — historically the reachable case was an upload made right after a wrong-password unlock — the rebuild is aborted outright and <code>replace_index()</code> is never called: the cloud's existing, complete index is left exactly as it was. Nothing is silently dropped from coverage. Combined with the fail-closed unlock in Flow A, a wrong password can no longer reach this code path at all; the abort itself remains as defence-in-depth against a genuinely corrupted document.</p></li>
+      </ol>
+
+      <h3>C · Search a keyword</h3>
+      <ol class="steps">
+        <li><h4>Build token</h4><p>Normalise the query, derive <code>K1</code> (and, locally, <code>K2</code> for the decryption step below); send only <code>K1</code> to the cloud as the search token (Section 06).</p></li>
+        <li><h4>Cloud looks up</h4><p>Server iterates <code>F(K1,counter)</code> over <code>D</code>, returns matching encrypted IDs, stops at first miss.</p></li>
+        <li><h4>Decrypt IDs</h4><p>Client derives <code>K2</code> locally and runs <code>Dec(K2, value)</code> to recover the real <code>doc_id</code> list. Any single bad/tampered value aborts the whole batch rather than silently dropping it.</p></li>
+        <li><h4>Fetch &amp; open</h4><p>Client requests those blobs, AES-GCM-decrypts them (tag verified), shows the plaintext filenames and files.</p></li>
+      </ol>
+
+      <h3>D · Download / view a file</h3>
+      <ol class="steps">
+        <li><h4>Request blob</h4><p>By <code>doc_id</code>; cloud returns <code>nonce ‖ ct ‖ tag</code>.</p></li>
+        <li><h4>Decrypt &amp; verify</h4><p><code>AES-GCM-Dec(K_file, …)</code> — if the tag fails, the file was tampered or corrupted, and decryption is rejected.</p></li>
+      </ol>
+    </section>
+
+    <!-- 8 -->
+    <section id="db">
+      <div class="sec-num">Section 08</div>
+      <h2>Database structure</h2>
+      <p>The cloud uses <strong>SQLite</strong> — zero-setup, inspectable, and perfect for a demo where you dump the tables to prove they hold only ciphertext. Three tables, all on the untrusted side. The client keeps no database; it holds keys in memory and reads the salt on unlock.</p>
+
+      <div class="twrap">
+        <table>
+          <caption>Cloud schema — everything here is untrusted</caption>
+          <thead><tr><th style="width:22%">Table</th><th style="width:30%">Columns</th><th>What it stores / what it leaks</th></tr></thead>
+          <tbody>
+            <tr><td class="mono-cell">documents</td><td class="mono-cell">doc_id (PK)<br>enc_name<br>nonce<br>ciphertext<br>tag<br>size<br>uploaded_at</td><td>Encrypted file blobs and encrypted filenames. Leaks: file count, individual ciphertext length (mitigate with padding), upload timing.</td></tr>
+            <tr><td class="mono-cell">sse_index</td><td class="mono-cell">label (PK)<br>value</td><td>The flat Π<sub>bas</sub> dictionary <code>D</code>. Leaks: total number of (keyword, document) pairs = row count. Individual rows reveal nothing.</td></tr>
+            <tr><td class="mono-cell">meta</td><td class="mono-cell">key (PK)<br>value</td><td>Non-secret parameters, one row per key: <code>kdf_salt</code> (16 random bytes) and <code>kdf_verifier</code> (AES-GCM encryption of a fixed constant under <code>K_index</code> — see Section 04/07·A). Both are required together; the client refuses to unlock if only one is present, and equally refuses if <em>both</em> are missing while the <code>documents</code> table still holds rows (Section 07·A). The <code>documents</code> table is what distinguishes a fresh vault from a stripped one. Neither reveals <code>K_index</code> or the password — the verifier is only ever decrypted, never derived from.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note"><span class="label">Deliberately absent</span><p>There is no <code>keywords</code> table, no <code>filename</code> column in plaintext, and no user-key column anywhere. If a reviewer can point at a column and read something meaningful, the design has failed — so keep the schema this bare. <code>kdf_verifier</code> does not weaken this: it is ciphertext, indistinguishable from random bytes to the cloud, and exists purely so the client can refuse to trust a password it never should have.</p></div>
+    </section>
+
+    <!-- 9 -->
+    <section id="threat">
+      <div class="sec-num">Section 09</div>
+      <h2>Security model &amp; information leakage</h2>
+      <p>State the model precisely — vague threat models lose marks. This project defends against an <strong>honest-but-curious (semi-honest) cloud</strong>: it stores your data, runs the protocol faithfully, but analyses everything it can see to learn about your files and queries. The client is trusted; transport is protected by TLS (which hides data in transit — SSE is what protects it <em>at rest</em> and hides <em>what you search</em>).</p>
+
+      <h4>Cryptographic assumptions</h4>
+      <p>Security rests on standard, citable assumptions: HMAC-SHA256 is a secure pseudorandom function (labels and tokens are unpredictable); AES-256-GCM is IND-CPA secure and provides authenticated encryption (confidentiality + tamper detection); Argon2id resists offline password guessing.</p>
+
+      <h4>What the design leaks — stated honestly</h4>
+      <div class="twrap">
+        <table>
+          <caption>Leakage profile of Π<sub>bas</sub> — as implemented, evidence-tested in Phase 6</caption>
+          <thead><tr><th style="width:26%">Leakage</th><th style="width:20%">When</th><th>What the server learns / mitigation</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Setup size</strong></td><td>At upload</td><td>Number of files and total keyword-document pairs (row counts). Unavoidable in this scheme; can be blurred by padding <code>D</code> with dummy entries.</td></tr>
+            <tr><td><strong>File length</strong></td><td>At upload</td><td>Each ciphertext's size ≈ plaintext size. Mitigate by padding files to size buckets.</td></tr>
+            <tr><td><strong>Search pattern</strong></td><td>At search</td><td>Whether two queries are for the <em>same</em> keyword — the <code>K1</code> search token is byte-identical across repeats of the same word (Section 06). Fundamental to Π<sub>bas</sub>; hiding it needs ORAM-style machinery (out of scope). Demonstrated live as D2 in the Phase-6 evidence suite.</td></tr>
+            <tr><td><strong>Result volume</strong></td><td>At search</td><td>How <em>many</em> documents a query matched — the cloud's own <code>/search</code> response carries <code>count</code> explicitly — plus the total number of (keyword, document) postings in the whole vault, readable at any time as a bare <code>COUNT(*)</code> on <code>sse_index</code> with no decryption. A volume signal only: it says how many, never which. Demonstrated live as D3a.</td></tr>
+            <tr><td><strong>Access pattern</strong></td><td>At search</td><td>Which specific <code>doc_id</code>s (as opaque handles) a query matched, and co-occurrence across queries — a distinct and strictly stronger signal than volume above. Because <code>api_search()</code> resolves each result's filename by fetching that document, one search produces the literal, cloud-visible sequence <code>POST /search</code> followed by exactly <code>count</code> × <code>GET /documents/&lt;doc_id&gt;</code>, naming the matched handles in the URL path. Repeating a search reproduces an identical access pattern; a different keyword produces a distinguishable one — linkage the cloud can read from the fetches alone, independently of D2's token equality. Amplified beyond what Π<sub>bas</sub> requires by that eager per-result fetch (audit M4, open). Demonstrated live as D3b.</td></tr>
+            <tr><td><strong>Static-rebuild cost</strong></td><td>At every upload</td><td>Because the index is a full atomic rebuild rather than an incremental patch (Section 07·B), the cloud observes the client re-fetching every stored document on every single upload — the per-upload GET count grows 1→2→3… Confirms the design's own static-index cost is observable, not just theoretical. Demonstrated live as D7.</td></tr>
+            <tr><td><strong>No forward privacy across rebuilds</strong></td><td>Across uploads</td><td>A <code>K1</code> token captured once for a keyword stays valid against that keyword's index rows even after later rebuilds add new matching documents — replaying an old captured token still returns a growing match count. Named as future work in Section 01/10, not mitigated. Demonstrated live as D8 (captures a token, triggers a rebuild via a second upload, replays the old token directly against the cloud).</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note risk"><span class="label">Be ready for this viva question</span><p>"Could the cloud recover my keywords?" — Yes, in principle, via <strong>leakage-abuse attacks</strong> (e.g. the IKK and count attacks) that combine access-pattern and volume leakage with background knowledge about the corpus. This is a known, published limitation of efficient SSE, not a bug in your code. Knowing and naming it is exactly what distinguishes a strong project.</p></div>
+
+      <h4>Fail-closed fixes from an independent audit — H1 &amp; H2 (Phase 6)</h4>
+      <p>An independent adversarial security review (<code>docs/security_audit_opus_phase6_readiness.md</code>, 12 live probes against the real two-process system) found two High-severity findings in the operational layer above — not in the cryptographic core itself. Both are now closed:</p>
+      <div class="twrap">
+        <table>
+          <caption>H1 &amp; H2 — before vs. after</caption>
+          <thead><tr><th style="width:22%">Finding</th><th style="width:39%">Before the fix</th><th>After the fix</th></tr></thead>
+          <tbody>
+            <tr><td><strong>H1</strong> — destructive index rebuild</td><td>Unlocking with a wrong password produced no error. The next upload's index rebuild silently excluded every document that failed to decrypt, then <em>destructively replaced</em> the cloud's complete index with an incomplete one — every HTTP status on the path was a success code.</td><td>Unlock itself now fails closed (see <code>kdf_verifier</code>, Section 07·A) before a wrong-password key ever reaches an upload. As defence-in-depth, the rebuild step also refuses to push a partial index for any other reason — it aborts and leaves the existing index untouched (Section 07·B).</td></tr>
+            <tr><td><strong>H2</strong> — unauthenticated KDF material</td><td>The client accepted <code>kdf_salt</code> from the untrusted cloud with no way to check it was correct. Deleting that one row made the next unlock silently mint a brand-new vault identity while reporting "unlocked".</td><td><code>kdf_verifier</code> makes password correctness checkable: a wrong password, a deleted/corrupted salt, or a deleted verifier all fail the unlock (401 or 409) instead of silently succeeding or minting a new identity.</td></tr>
+            <tr><td><strong>F1</strong> — both KDF rows deleted <span class="tag t-untrust">follow-up</span></td><td>The H2 fix above rejected <em>one</em> missing KDF row but still read <em>both</em> missing as "fresh vault". Deleting both from a populated vault therefore minted a new identity and returned <code>200 unlocked</code> for any password at all, leaving the real documents permanently unreadable behind it.</td><td>Bootstrap now requires both rows absent <em>and</em> an empty <code>documents</code> table. Both absent with documents present is refused (409) for every password; no new identity is minted and no stored byte is rewritten (Section 07·A). Found by a follow-up review of the H1/H2 fix itself and regression-tested in <code>tests/test_client_app.py::TestF1BothKdfRowsMissingRegression</code>.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>The fix adds no user accounts, sessions, or broader authentication concept — <code>kdf_verifier</code> is one non-secret AES-GCM ciphertext, checked at the single point (unlock) where the audit found the gap. Of the six Medium-severity findings from the same audit, <strong>four remain open</strong> and are named here rather than hidden: Argon2 parameter versioning (the cost parameters are compiled-in constants, never persisted alongside the salt); no AAD binding (nothing ties a ciphertext to the <code>doc_id</code> it is stored under, so a cloud that swaps two whole records passes every GCM tag check); silent search truncation (a <em>corrupted</em> index value aborts the batch, but a <em>withheld</em> one simply shortens the result list undetectably); and eager result fetch, now demonstrated as D3b above. A fifth, the no-forward-privacy leak, is demonstrated as D8 and accepted by scope (§01/§10). The sixth — silent index eviction of a document that fails to decrypt — was <strong>closed as a side effect of the H1 fix</strong>: the rebuild now records every failure and aborts loudly (Section 07·B) instead of quietly dropping coverage. One narrow silent skip survives it by design: a document deleted between the rebuild's listing and its fetch is passed over rather than treated as an error. Closing H1/H2 (and F1) was this project's explicitly scoped fix, not a claim that every Medium finding is resolved.</p>
+      <p>All of the above — D1 through D8, and the H1/H2 regression behaviour — are proven, not just asserted: <code>tests/test_security_demonstrations.py</code> drives the real two-process system (a live <code>cloud_app.py</code> Flask server on its own port) and records the actual wire traffic and database bytes as evidence, which a <code>pytest_sessionfinish</code> hook renders into <code>docs/security_demo_report.html</code> on every test run — a dashboard built from captured evidence, not a hand-written table of claims.</p>
+    </section>
+
+    <!-- 10 -->
+    <section id="problems">
+      <div class="sec-num">Section 10</div>
+      <h2>Problems to catch <em>before</em> writing code</h2>
+      <p>These are the failure modes that most student SSE projects ship by accident. Design them out now.</p>
+      <div class="twrap">
+        <table>
+          <thead><tr><th style="width:30%">Risk</th><th style="width:34%">Why it bites</th><th>Design response</th></tr></thead>
+          <tbody>
+            <tr><td>GCM nonce reuse</td><td>Reusing a nonce with the same key under GCM is catastrophic — it can reveal plaintext and forge tags.</td><td>Fresh random 96-bit nonce per encryption; store it with the ciphertext. Never a fixed nonce.</td></tr>
+            <tr><td>Tokenizer mismatch</td><td>Different normalisation at index vs. search → searches silently return nothing.</td><td>Single shared <code>tokenizer.py</code>; unit-test that index and search agree.</td></tr>
+            <tr><td>Plaintext filename leak</td><td>Encrypting contents but leaving filenames readable hands the cloud your keywords for free.</td><td>Encrypt filenames with <code>K_file</code>; store only <code>enc_name</code>.</td></tr>
+            <tr><td>Weak password → keys</td><td>Fast KDF (plain SHA-256, low-iteration PBKDF2) lets an attacker brute-force the vault offline.</td><td>Argon2id with tuned memory/time cost; PBKDF2-HMAC-SHA256 high-iteration only as fallback.</td></tr>
+            <tr><td>Small keyword space</td><td>Deterministic tokens + a guessable keyword set enable dictionary attacks on queries.</td><td>Acknowledge as inherent; keep keyword set realistic; note padding/obfuscation as future work.</td></tr>
+            <tr><td>Static-only assumption</td><td>Bolting on live updates later, naïvely, breaks <em>forward privacy</em> (new files linkable to past searches).</td><td>Scope as static: to add files, rebuild the index. Do not claim forward privacy.</td></tr>
+            <tr><td>Server result tampering</td><td>An honest-but-curious model does not cover a malicious server dropping/altering results.</td><td>Out of scope by model; AES-GCM still detects blob tampering. Name verifiable SSE as future work.</td></tr>
+            <tr><td>Keys written to disk</td><td>Any persisted key defeats the at-rest guarantee.</td><td>Keys in memory only; wipe on lock; persist nothing but salt + params.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 11 -->
+    <section id="folders">
+      <div class="sec-num">Section 11</div>
+      <h2>Project folder structure</h2>
+      <p>Structure mirrors the trust boundary: a <code>client/</code> package (trusted, all crypto), a <code>cloud/</code> package (untrusted store), and a <code>web/</code> UI reusing your existing <code>index.html</code> / <code>main.js</code> / <code>style.css</code>.</p>
+      <pre>cyber_pr/
+├─ client/                  <span class="c"># TRUSTED — all keys &amp; plaintext</span>
+│  ├─ crypto.py             <span class="c"># AES-GCM, HMAC PRF (F), HKDF wrappers</span>
+│  ├─ keymgmt.py            <span class="c"># Argon2id, master key, sub-key derivation</span>
+│  ├─ tokenizer.py          <span class="c"># the ONE shared keyword normaliser</span>
+│  ├─ indexer.py            <span class="c"># Π_bas index build (labels + values)</span>
+│  ├─ search.py             <span class="c"># token generation + result decryption</span>
+│  └─ client_app.py         <span class="c"># Flask: serves web/, relays ciphertext to cloud</span>
+├─ cloud/                   <span class="c"># UNTRUSTED — zero keys</span>
+│  ├─ cloud_app.py          <span class="c"># Flask: /upload /download /search /index</span>
+│  ├─ storage.py            <span class="c"># SQLite access layer</span>
+│  └─ vault.sqlite3         <span class="c"># documents · sse_index · meta</span>
+├─ web/                     <span class="c"># UI (reuse your existing files)</span>
+│  ├─ index.html
+│  ├─ main.js
+│  └─ style.css
+├─ tests/
+│  ├─ test_crypto.py
+│  ├─ test_index_search.py
+│  └─ test_integration.py
+├─ benchmarks/
+│  └─ measure.py            <span class="c"># timing + storage-overhead charts</span>
+├─ data/sample_corpus/      <span class="c"># small plaintext files to demo on</span>
+├─ docs/architecture.html   <span class="c"># this document</span>
+├─ requirements.txt         <span class="c"># cryptography, argon2-cffi, flask, pytest, matplotlib</span>
+└─ README.md</pre>
+    </section>
+
+    <!-- 12 -->
+    <section id="ui">
+      <div class="sec-num">Section 12</div>
+      <h2>UI modules</h2>
+      <p>Six focused screens. The last one is your demo centrepiece — build it, it wins marks.</p>
+      <div class="twrap">
+        <table>
+          <thead><tr><th style="width:24%">Module</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Unlock</strong></td><td>Password entry → key derivation. Shows a clear "vault locked / unlocked" state; keys never leave the client.</td></tr>
+            <tr><td><strong>Upload</strong></td><td>Pick files → client encrypts &amp; indexes → pushes ciphertext. Progress and per-file status.</td></tr>
+            <tr><td><strong>Vault list</strong></td><td>Lists stored files by their <em>decrypted</em> names (decrypted client-side only) with size and date.</td></tr>
+            <tr><td><strong>Search</strong></td><td>Keyword box → token → matching files, with search latency shown for the metrics story.</td></tr>
+            <tr><td><strong>View / download</strong></td><td>Fetch a blob, decrypt, verify tag, open or save. Surfaces tamper-detection failures clearly.</td></tr>
+            <tr><td><strong>"What the cloud sees"</strong></td><td>Read-only inspector rendering the raw <code>documents</code> and <code>sse_index</code> rows exactly as the server stores them — proving zero plaintext leakage live.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 13 -->
+    <section id="testing">
+      <div class="sec-num">Section 13</div>
+      <h2>Testing strategy</h2>
+      <p>Tests are evidence you can point to in the viva. Use <code>pytest</code> and group them by claim.</p>
+      <h4>Unit (the primitives are correct)</h4>
+      <p>KDF determinism (same password+salt → same keys; different salt → different keys); AES-GCM encrypt→decrypt round-trip equals the original; a flipped ciphertext byte makes decryption <em>fail</em> (tamper detection); HMAC token determinism; tokenizer produces identical output for equivalent inputs.</p>
+      <h4>Functional (the system is correct)</h4>
+      <p>Index build then search a known keyword returns <em>exactly</em> the expected <code>doc_id</code> set; a non-existent keyword returns empty; download→decrypt reproduces the original file (hash equality).</p>
+      <h4>Security demonstrations (the claims hold)</h4>
+      <p>Implemented as <code>tests/test_security_demonstrations.py</code> (8 evidence-driven demonstrations, D1–D8, recorded as 10 evidence entries because D3 and D4 each split in two, against the real live two-process system) rendering <code>docs/security_demo_report.html</code> automatically on every run: dump the cloud DB and assert no plaintext keyword, filename, or file content appears (D1); show that searching the same word twice yields identical <code>K1</code> tokens (D2); separate the two search-time leaks the cloud sees — exact match count and total index size (D3a, volume) from the observable <code>POST /search</code> → <code>GET /documents/&lt;doc_id&gt;</code> sequence naming the matched handles (D3b, access pattern); show tampering <em>within</em> a stored blob is caught by the GCM tag (D4a, D4b); show a deleted/corrupted <code>kdf_salt</code> or a wrong password now fails <em>closed</em> at unlock — 409 or 401 — rather than silently succeeding (D5, D6, the H1/H2 regression from Section 09; F1's both-rows-deleted case is regression-tested in <code>tests/test_client_app.py</code> rather than in the demonstration suite); show the static rebuild's per-upload cost is observable (D7) and that a captured token survives later rebuilds (D8, no forward privacy).</p>
+      <h4>Performance</h4>
+      <p>The benchmark suite below, run as repeatable tests so numbers are reproducible.</p>
+    </section>
+
+    <!-- 14 -->
+    <section id="metrics">
+      <div class="sec-num">Section 14</div>
+      <h2>Performance metrics</h2>
+      <p>Measure, tabulate, and chart these. Concrete numbers turn "it works" into "here is how it scales".</p>
+      <div class="twrap">
+        <table>
+          <thead><tr><th style="width:30%">Metric</th><th style="width:30%">Varied against</th><th>What it demonstrates</th></tr></thead>
+          <tbody>
+            <tr><td>Index build time</td><td>Number of documents / keywords</td><td>Setup cost growth (expect roughly linear in total pairs).</td></tr>
+            <tr><td>Search latency</td><td>Index size (total postings)</td><td>Query cost — should scale with result size, not total corpus.</td></tr>
+            <tr><td>Encrypt / decrypt throughput</td><td>File size (MB/s)</td><td>AES-GCM is fast; crypto is not the bottleneck.</td></tr>
+            <tr><td>Storage overhead</td><td>Ciphertext vs. plaintext; index vs. corpus</td><td>The price of security, quantified.</td></tr>
+            <tr><td>Token generation time</td><td>—</td><td>Effectively constant; shows client cost is trivial.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note"><span class="label">Presentation tip</span><p>Generate two or three matplotlib charts from <code>benchmarks/measure.py</code> (build time vs. corpus size; search latency vs. index size). One clean graph in the report communicates more than a page of prose.</p></div>
+    </section>
+
+    <!-- 15 -->
+    <section id="plan">
+      <div class="sec-num">Section 15</div>
+      <h2>Phased implementation plan</h2>
+      <p>Nine phases, each with a goal, the files it touches, and a done-criterion another developer can verify. Build strictly in order — every phase runs on the one before it.</p>
+
+      <details class="phase" open>
+        <summary><span class="pnum">P0</span><span class="ptitle">Scaffold &amp; environment</span><span class="pgoal">runnable skeleton</span></summary>
+        <div class="pbody">
+          <p>Create the folder tree, a virtualenv, and <code>requirements.txt</code> (<code>cryptography</code>, <code>argon2-cffi</code>, <code>flask</code>, <code>pytest</code>, <code>matplotlib</code>). Add a small <code>data/sample_corpus/</code> of plaintext files to test on.</p>
+          <span class="done">Done when: both Flask apps start on separate ports and return a health check.</span>
+        </div>
+      </details>
+      <details class="phase">
+        <summary><span class="pnum">P1</span><span class="ptitle">Crypto core &amp; key management</span><span class="pgoal">tested primitives</span></summary>
+        <div class="pbody">
+          <p>Implement <code>crypto.py</code> (AES-GCM encrypt/decrypt, HMAC-based <code>F</code>, HKDF) and <code>keymgmt.py</code> (Argon2id → master → sub-keys). Nothing else may exist yet.</p>
+          <span class="done">Done when: <code>test_crypto.py</code> passes — round-trips, tamper detection, KDF determinism.</span>
+        </div>
+      </details>
+      <details class="phase">
+        <summary><span class="pnum">P2</span><span class="ptitle">Cloud storage service</span><span class="pgoal">stores ciphertext</span></summary>
+        <div class="pbody">
+          <p>Build <code>storage.py</code> (SQLite schema: documents, sse_index, meta) and <code>cloud_app.py</code> routes to store/retrieve encrypted blobs and index rows. The cloud handles bytes only.</p>
+          <span class="done">Done when: an encrypted blob can be POSTed, listed, and fetched back byte-identical.</span>
+        </div>
+      </details>
+      <details class="phase">
+        <summary><span class="pnum">P3</span><span class="ptitle">Tokenizer &amp; encrypted index build</span><span class="pgoal">index in the cloud</span></summary>
+        <div class="pbody">
+          <p>Write the shared <code>tokenizer.py</code> and <code>indexer.py</code> (Π<sub>bas</sub> setup: labels + encrypted IDs). Upload a corpus and populate <code>sse_index</code>.</p>
+          <span class="done">Done when: a test asserts the dictionary has the expected entry count and no plaintext.</span>
+        </div>
+      </details>
+      <details class="phase">
+        <summary><span class="pnum">P4</span><span class="ptitle">Search end-to-end</span><span class="pgoal">correct results</span></summary>
+        <div class="pbody">
+          <p>Implement <code>search.py</code> (token gen + result decryption) and the cloud search loop. Single-keyword query returns the correct <code>doc_id</code> set.</p>
+          <span class="done">Done when: <code>test_index_search.py</code> passes on known keywords, including the empty-result case.</span>
+        </div>
+      </details>
+      <details class="phase">
+        <summary><span class="pnum">P5</span><span class="ptitle">Client service &amp; UI wiring</span><span class="pgoal">usable app</span></summary>
+        <div class="pbody">
+          <p><code>client_app.py</code> serves <code>web/</code> and orchestrates unlock, upload, search, download. Wire your existing <code>index.html</code>/<code>main.js</code>/<code>style.css</code> to these endpoints.</p>
+          <span class="done">Done when: a user can unlock, upload, search, and open a file entirely through the UI.</span>
+        </div>
+      </details>
+      <details class="phase">
+        <summary><span class="pnum">P6</span><span class="ptitle">Security hardening &amp; demo panel</span><span class="pgoal">provable claims</span></summary>
+        <div class="pbody">
+          <p>Encrypt filenames, add optional file-size padding, and build the "what the cloud sees" inspector. Add the security-demonstration tests.</p>
+          <span class="done">Done when: the inspector shows only ciphertext, and tamper/wrong-password tests pass.</span>
+        </div>
+      </details>
+      <details class="phase">
+        <summary><span class="pnum">P7</span><span class="ptitle">Benchmarks &amp; metrics</span><span class="pgoal">numbers + charts</span></summary>
+        <div class="pbody">
+          <p><code>benchmarks/measure.py</code> times build/search/throughput across corpus sizes and emits matplotlib charts.</p>
+          <span class="done">Done when: at least two reproducible charts are generated from a single command.</span>
+        </div>
+      </details>
+      <details class="phase">
+        <summary><span class="pnum">P8</span><span class="ptitle">Docs &amp; viva prep</span><span class="pgoal">defensible</span></summary>
+        <div class="pbody">
+          <p>Write <code>README.md</code> (setup + run + demo script), fold the threat model and leakage table into the report, and rehearse the demo in the A→B→C→D order from Section 07.</p>
+          <span class="done">Done when: a fresh reader can clone, run, and reproduce the demo from the README alone.</span>
+        </div>
+      </details>
+    </section>
+
+    <!-- 16 -->
+    <section id="viva">
+      <div class="sec-num">Section 16</div>
+      <h2>Viva defence cheat-sheet</h2>
+      <p>The questions an examiner reliably asks, with crisp answers you can own.</p>
+      <div class="kv">
+        <dt>Q</dt><dd><strong>How can the server search without knowing the keyword?</strong> It never sees the keyword — only a per-keyword token, <code>K1</code>, derived by HMAC (as implemented, <code>K2</code> is never sent — Section 06). It regenerates deterministic labels <code>F(K1,0), F(K1,1)…</code> and looks them up; the labels are meaningless without <code>K1</code>.</dd>
+        <dt>Q</dt><dd><strong>Why symmetric and not public-key search?</strong> Single data owner searching their own data — symmetric SSE is far faster and simpler, and public-key searchable encryption (PEKS) buys nothing here while costing performance.</dd>
+        <dt>Q</dt><dd><strong>What does the server learn?</strong> Setup size, file lengths, and — per query — search pattern, result volume, and access pattern; plus, from the static-index design, that a full rebuild happens on every upload and that a captured token stays valid across rebuilds. Keep the last two apart, because an examiner will push on it: <em>volume</em> is how many documents matched (D3a), <em>access pattern</em> is which opaque <code>doc_id</code>s they were, which the cloud reads directly from the <code>GET /documents/&lt;doc_id&gt;</code> calls our own search issues right after the token (D3b). Not the keywords or contents directly. (Section 09.)</dd>
+        <dt>Q</dt><dd><strong>What happens if someone unlocks with the wrong password?</strong> Unlock fails closed: the client decrypts a stored <code>kdf_verifier</code> with the derived <code>K_index</code>, and a wrong password makes that decryption fail, returning 401 before the key is trusted for anything. This closes an audited High-severity finding (H1) where a wrong-password session used to unlock silently and then destroy the real index on the next upload — see Section 09. The follow-up question is worth rehearsing too: <em>what if the cloud deletes the KDF rows instead?</em> One row missing, or both missing while documents still exist, is refused with a 409 and nothing is rewritten; only a vault with no KDF rows <em>and</em> no documents may bootstrap a new identity (fix F1, Section 07·A).</dd>
+        <dt>Q</dt><dd><strong>Is it breakable?</strong> Confidentiality rests on AES-GCM and HMAC. The realistic threat is leakage-abuse attacks exploiting access/volume patterns with corpus knowledge — a known limitation of efficient SSE, which is why we state it rather than hide it.</dd>
+        <dt>Q</dt><dd><strong>Why is nonce handling critical?</strong> GCM nonce reuse under one key is catastrophic; we use a fresh random nonce per encryption, stored beside the ciphertext.</dd>
+        <dt>Q</dt><dd><strong>What would you add with more time?</strong> Multi-keyword (conjunctive) search, forward-private dynamic updates, result padding to blunt volume leakage, verifiable SSE against a malicious server, and the remaining Medium-severity findings from the Phase-6 audit (AAD binding, Argon2 parameter versioning).</dd>
+      </div>
+      <div class="note decide"><span class="label">The one-line pitch</span><p>"I built encrypted cloud storage where the server can search my files by keyword but never learns the keyword, the filename, or a single byte of content — and I can show you exactly what it does and doesn't leak."</p></div>
+    </section>
+
+    <hr class="rule">
+  </main>
+</div>
+
+<footer>
+  <div class="wrap">
+    <span>Stage 1 · Architecture &amp; Security Design — Encrypted Cloud Vault (SSE)</span>
+    <span style="font-family:'IBM Plex Mono',monospace">Π<sub>bas</sub> · Python + Flask · honest-but-curious model · Phases 1–6 implemented</span>
+  </div>
+</footer>
+
+<script>
+  (function(){
+    var root=document.documentElement, btn=document.getElementById('tt');
+    function cur(){var s=root.getAttribute('data-theme'); if(s)return s;
+      return window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}
+    try{var saved=localStorage.getItem('sse-theme'); if(saved)root.setAttribute('data-theme',saved);}catch(e){}
+    btn.addEventListener('click',function(){
+      var next=cur()==='dark'?'light':'dark';
+      root.setAttribute('data-theme',next);
+      try{localStorage.setItem('sse-theme',next);}catch(e){}
+    });
+    // TOC scroll-spy
+    var links=[].slice.call(document.querySelectorAll('nav.toc a'));
+    var map={}; links.forEach(function(a){map[a.getAttribute('href').slice(1)]=a;});
+    var obs=new IntersectionObserver(function(es){
+      es.forEach(function(en){ if(en.isIntersecting){
+        links.forEach(function(a){a.classList.remove('active');});
+        var a=map[en.target.id]; if(a)a.classList.add('active');
+      }});
+    },{rootMargin:'-15% 0px -70% 0px'});
+    document.querySelectorAll('main section[id]').forEach(function(s){obs.observe(s);});
+  })();
+</script>
+</body>
+</html>
